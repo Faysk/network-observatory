@@ -214,8 +214,6 @@ async function openSheet(metric){
  $('#sheetLayer').hidden=false;document.body.classList.add('sheet-open');$('.shell').inert=true;
  $('#detailSheet').focus();await loadSheet();
 }
- state.metric=config[metric]?metric:'router';state.period='24h';state.filter='all';state.main=true;state.secondary=true;state.lastFocus=document.activeElement;
- $('#sidebar').classList.remove('open');$('#menuToggle').setAttribute('aria-expanded','false');$('#sheetLayer').hidden=false;document.body.classList.add('sheet-open');$('#detailTitle').textContent=config[state.metric].title;$('#detailDesc').textContent=config[state.metric].desc;$('#detailSheet').focus();await loadSheet();}
 function closeSheet(){
  abortSheet();state.metric=null;state.bundle=null;state.request++;
  $('#sheetLayer').hidden=true;document.body.classList.remove('sheet-open');
