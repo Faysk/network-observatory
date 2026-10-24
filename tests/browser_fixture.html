@@ -25,7 +25,7 @@
   assert(w.FNO.state.resources.inventory.phase==='empty','valid empty inventory misclassified');
   notes.push('summary retry and [] inventory');
   const trigger=d.querySelector('.nav-item[data-detail="latency"]');
-  trigger.click();
+  trigger.focus();trigger.click();
   await wait(()=>!d.getElementById('sheetLayer').hidden,'sheet opening');
   assert(d.getElementById('legendBox').textContent.includes('TCP gateway'),'stale legend inherited from traffic');
   assert(d.querySelector('[data-period="24h"]').getAttribute('aria-pressed')==='true','initial range not active');
