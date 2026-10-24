@@ -2,6 +2,7 @@
 import concurrent.futures
 import gzip
 import json
+import time
 import tempfile
 import threading
 import time
@@ -143,6 +144,32 @@ class SafeStaticHttp(unittest.TestCase):
         self.assertEqual(self.get('/router/app.js',{'Accept-Encoding':'gzip;q=0'})[2].get('Content-Encoding'),None)
         self.assertEqual(self.get('/router/app.js',method='HEAD')[1],b'')
         self.assertEqual(self.get('/router/app.js',{'If-Modified-Since':headers['Last-Modified']})[0],304)
+    def test_content_change_changes_etag_and_other_formats_do_not_cache(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            asset=root/'app.js'
+            asset.write_text('const assetVersion = "first";'+('x'*2400))
+            (root/'photo.png').write_bytes(b'fixture image payload')
+            (root/'data.json').write_text('{"private":true}')
+            with patch('app.server.STATIC',root):
+                _,_,first=self.get('/router/app.js')
+                old_tag=first['ETag']
+                # Revision changes bytes, not just a query-string version.
+                asset.write_text('const assetVersion = "second";'+('x'*2400))
+                import os
+                os.utime(asset,(time.time()+2,time.time()+2))
+                code,body,headers=self.get('/router/app.js',{'If-None-Match':old_tag})
+                self.assertEqual(code,200)
+                self.assertNotEqual(headers['ETag'],old_tag)
+                self.assertIn(b'second',body)
+                self.assertEqual(self.get('/router/app.js',{'If-None-Match':headers['ETag']})[0],304)
+                for path in ('/photo.png','/data.json'):
+                    code,_,head=self.get(path,{'Accept-Encoding':'gzip'})
+                    self.assertEqual(code,200)
+                    self.assertEqual(head['Cache-Control'],'no-store')
+                    self.assertNotIn('ETag',head)
+                    self.assertNotIn('Content-Encoding',head)
+
     def test_private_and_dynamic_not_cached(self):
         for path in ('/router/','/api/status','/api/v1/overview?period=24h&view=summary','/s7/'):
             code,_,headers=self.get(path)
