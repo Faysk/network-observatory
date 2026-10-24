@@ -224,7 +224,7 @@ function updateSheetMeta(){
  $('#detailTitle').textContent=c.title;$('#detailCrumb').textContent=c.title.toUpperCase();
  $('#detailDesc').textContent=c.desc;$('#chartTitle').textContent=c.title;
  $('#detailEyebrow').textContent='INVESTIGAÇÃO / LEITURAS REAIS';
- $('[data-period]').forEach(el=>{const active=el.dataset.period===state.period;
+ $$('[data-period]').forEach(el=>{const active=el.dataset.period===state.period;
    el.classList.toggle('active',active);el.setAttribute('aria-pressed',String(active))});
  $('#legendBox').innerHTML=[
    ...(c.a?[['main',c.main,state.main]]:[]),
