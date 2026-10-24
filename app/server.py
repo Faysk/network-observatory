@@ -60,7 +60,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def static_code(self, target, mime):
         stat=target.stat()
-        raw,packed,etag=_code_asset(str(target),stat.st_mtime_ns,stat.st_size)
+        raw,packed,raw_tag=_code_asset(str(target),stat.st_mtime_ns,stat.st_size)
+        use_gzip=packed is not None and _accepts_gzip(self.headers.get('Accept-Encoding'))
+        # Strong ETags are representation-specific: gzip bytes != identity bytes.
+        etag=raw_tag[:-1]+('-gzip' if use_gzip else '-identity')+'"'
         modified=formatdate(stat.st_mtime,usegmt=True)
         match=self.headers.get('If-None-Match')
         valid=match is not None and any(tag.strip()=='*' or tag.strip().removeprefix('W/')==etag for tag in match.split(','))
@@ -69,7 +72,6 @@ class Handler(BaseHTTPRequestHandler):
                 parsed=parsedate_to_datetime(self.headers['If-Modified-Since'])
                 valid=parsed.tzinfo is not None and stat.st_mtime<=parsed.timestamp()+0.999
             except (ValueError,TypeError,OverflowError):pass
-        use_gzip=packed is not None and _accepts_gzip(self.headers.get('Accept-Encoding'))
         body=packed if use_gzip else raw
         self.send_response(304 if valid else 200)
         self.send_header('ETag',etag)
