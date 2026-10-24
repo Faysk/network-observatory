@@ -151,9 +151,11 @@ class SafeStaticHttp(unittest.TestCase):
         self.assertIn('private',headers['Cache-Control'])
         etag=headers['ETag']
         self.assertTrue(etag.startswith('"'))
-        self.assertEqual(self.get('/router/app.js',{'If-None-Match':etag})[0],304)
+        self.assertEqual(self.get('/router/app.js',{'If-None-Match':etag})[0],200)
         self.assertEqual(self.get('/router/app.js',{'If-None-Match':etag,'Accept-Encoding':'gzip'})[0],304)
         regular=self.get('/router/app.js')
+        self.assertNotEqual(regular[2]['ETag'],etag)
+        self.assertEqual(self.get('/router/app.js',{'If-None-Match':regular[2]['ETag']})[0],304)
         self.assertEqual(regular[0],200)
         self.assertNotIn('Content-Encoding',regular[2])
         self.assertEqual(self.get('/router/app.js',{'If-None-Match':'"stale"'} )[0],200)
