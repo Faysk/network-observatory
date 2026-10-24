@@ -14,6 +14,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m unittest discover -s tests -v
+      - run: python tools/bench_histories.py --samples-per-day 30
       - run: node tests/test_s7_ui.cjs
       - run: node --check app/static/app.js
       - run: node tests/browser_smoke.cjs
