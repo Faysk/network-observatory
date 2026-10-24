@@ -206,11 +206,70 @@ function panelExtras(metric){const h=state.status?.huawei||{},fresh=state.api&&h
  if(metric==='router')return keyvals([['Firmware',h.firmware],['RAM',fmt(h.metrics?.memory_pct)+'%'],['Tempo ligado',duration(h.metrics?.uptime_seconds)],['Óptica RX',fmt(h.metrics?.optical_rx_dbm)+' dBm'],['Óptica TX',fmt(h.metrics?.optical_tx_dbm)+' dBm'],['Temperatura do transceiver',fmt(h.metrics?.optical_temp_c)+' °C'],['PON',h.health?.pon_connected==null?'Sem dados':h.health.pon_connected?'Ligado':'Desligado'],...Object.entries(h.interfaces||{}).map(([k,v])=>[k.toUpperCase(),`RX ${fmt(v.rx_bytes,0)} bytes · TX ${fmt(v.tx_bytes,0)} bytes · erros RX/TX ${fmt(v.rx_errors,0)}/${fmt(v.tx_errors,0)}${k.startsWith('lan')?` · ${v.link_up==null?'estado não reportado':v.link_up?'ligada '+fmt(v.speed_mbps,0)+' Mbit/s':'sem ligação'}`:''}`])]);
  if(metric==='wifi')return keyvals(Object.entries(h.wifi||{}).map(([k,v])=>[k.toUpperCase(),`${v.enabled==null?'Estado não reportado':v.enabled?'Ativa':'Inativa'} · ${v.band||'banda desconhecida'} · canal ${fmt(v.channel,0)} · RX ${fmt(v.rx_bytes,0)} bytes · TX ${fmt(v.tx_bytes,0)} bytes · erros ${fmt(v.rx_errors,0)}/${fmt(v.tx_errors,0)}`]));
  if(metric==='health')return integrationPanel();return '';}
-async function openSheet(metric){if(metric==='devices'){document.dispatchEvent(new CustomEvent('fno:devices'));return;}
+async function openSheet(metric){
+ if(metric==='devices'){document.dispatchEvent(new CustomEvent('fno:devices'));return;}
+ if(state.metric)abortSheet();
+ state.metric=config[metric]?metric:'router';state.period='24h';state.filter='all';state.main=true;state.secondary=true;state.lastFocus=document.activeElement;
+ $('#sidebar').classList.remove('open');$('#menuToggle').setAttribute('aria-expanded','false');
+ $('#sheetLayer').hidden=false;document.body.classList.add('sheet-open');$('.shell').inert=true;
+ $('#detailSheet').focus();await loadSheet();
+}
  state.metric=config[metric]?metric:'router';state.period='24h';state.filter='all';state.main=true;state.secondary=true;state.lastFocus=document.activeElement;
  $('#sidebar').classList.remove('open');$('#menuToggle').setAttribute('aria-expanded','false');$('#sheetLayer').hidden=false;document.body.classList.add('sheet-open');$('#detailTitle').textContent=config[state.metric].title;$('#detailDesc').textContent=config[state.metric].desc;$('#detailSheet').focus();await loadSheet();}
-function closeSheet(){state.metric=null;state.request++;$('#sheetLayer').hidden=true;document.body.classList.remove('sheet-open');$('.shell').inert=false;state.lastFocus?.focus();}
-async function loadSheet(){const request=++state.request,metric=state.metric,period=state.period;state.bundle=null;$('#exportCsv').disabled=true;$('#detailStats').replaceChildren();$('#analysisRows').replaceChildren();$('#detailEvents').replaceChildren();$('#selectionSummary').textContent='Carregando as amostras do período selecionado…';$('#analysisText').textContent=config[metric].desc;$('#historyChart').innerHTML=empty('A carregar histórico…');try{const bundle=await api('/api/v1/overview?period='+period);if(request!==state.request||!state.metric)return;state.bundle=bundle;renderSheet();}catch(e){if(request!==state.request)return;$('#historyChart').innerHTML=empty('Não foi possível carregar o histórico.');toast(e.message);}}
+function closeSheet(){
+ abortSheet();state.metric=null;state.bundle=null;state.request++;
+ $('#sheetLayer').hidden=true;document.body.classList.remove('sheet-open');
+ $('.shell').inert=false;state.lastFocus?.focus({preventScroll:true});
+}
+function updateSheetMeta(){
+ const c=config[state.metric];if(!c)return;
+ $('#detailTitle').textContent=c.title;$('#detailCrumb').textContent=c.title.toUpperCase();
+ $('#detailDesc').textContent=c.desc;$('#chartTitle').textContent=c.title;
+ $('#detailEyebrow').textContent='INVESTIGAÇÃO / LEITURAS REAIS';
+ $('[data-period]').forEach(el=>{const active=el.dataset.period===state.period;
+   el.classList.toggle('active',active);el.setAttribute('aria-pressed',String(active))});
+ $('#legendBox').innerHTML=[
+   ...(c.a?[['main',c.main,state.main]]:[]),
+   ...(c.b?[['secondary',c.secondary,state.secondary]]:[])
+ ].map(([key,label,on])=>'<button type="button" class="legend-button '+(on?'':'off')+
+    '" data-series="'+key+'" aria-pressed="'+on+'">'+esc(label)+'</button>').join('');
+ $('#chartSubtitle').textContent='Período '+state.period+' · a aguardar a consulta atual.';
+ $('#resolutionText').textContent='Cobertura e resolução a carregar para '+state.period+'.';
+}
+async function loadSheet(){
+ if(!state.metric)return;
+ abortSheet();
+ const request=++state.request,metric=state.metric,period=state.period;
+ const controller=new AbortController();activeSheetAbort=controller;
+ state.bundle=null;updateSheetMeta();
+ $('#historyChart').setAttribute('aria-busy','true');
+ $('#exportCsv').disabled=true;$('#detailStats').replaceChildren();
+ $('#analysisRows').replaceChildren();$('#detailEvents').replaceChildren();
+ $('#selectionSummary').textContent='A carregar '+period+'. Dados do período anterior não são apresentados.';
+ $('#analysisText').textContent=config[metric].desc;
+ $('#historyChart').innerHTML=empty('A carregar histórico de '+period+'…');
+ try{
+   const bundle=await sheetBundle(period,controller.signal);
+   if(controller.signal.aborted||request!==state.request||state.metric!==metric||state.period!==period)return;
+   state.bundle=bundle;renderSheet();
+   const populated=bundle.series.length||bundle.probes?.length||bundle.events?.length;
+   if(!populated){
+     $('#historyChart').innerHTML=empty('Não existem amostras neste período.');
+     $('#historyChart').dataset.phase='empty';
+   }else $('#historyChart').dataset.phase='ready';
+ }catch(e){
+   if(controller.signal.aborted||request!==state.request||state.metric!==metric)return;
+   $('#historyChart').dataset.phase='error';
+   $('#historyChart').innerHTML='<div role="alert">Não foi possível carregar o histórico de '+esc(period)+
+     '. <button type="button" data-sheet-retry>Tentar novamente</button></div>';
+   $('#chartSubtitle').textContent='Histórico de '+period+' indisponível. Pode tentar novamente.';
+ }finally{
+   if(request===state.request&&state.metric===metric){
+     $('#historyChart').setAttribute('aria-busy','false');
+     if(activeSheetAbort===controller)activeSheetAbort=null;
+   }
+ }
+}
 function renderSheet(){const c=config[state.metric],b=state.bundle;if(!c||!b)return;$('#detailTitle').textContent=c.title;$('#detailCrumb').textContent=c.title.toUpperCase();$('#detailDesc').textContent=c.desc;$('#detailEyebrow').textContent='INVESTIGAÇÃO / LEITURAS REAIS';$('#chartTitle').textContent=c.title;$('#chartSubtitle').textContent=`${time(b.period.from)} — ${time(b.period.to)} · médias por intervalo; extremos preservados`;
  $$('[data-period]').forEach(el=>{const active=el.dataset.period===state.period;el.classList.toggle('active',active);el.setAttribute('aria-pressed',active);});
  const defs=[...(c.a&&state.main?[{key:c.a,label:c.main,color:'#c3a4ff',scale:c.scale,unit:c.unit}]:[]),...(c.b&&state.secondary?[{key:c.b,label:c.secondary,color:'#69e9dc',scale:c.scale,unit:c.unit}]:[])];
@@ -238,7 +297,9 @@ function trap(event,layer){if(event.key!=='Tab')return;const nodes=$$('button,a[
 function init(){
  $$('[data-detail]').forEach(el=>el.addEventListener('click',()=>openSheet(el.dataset.detail)));
  $('#modeToggle').addEventListener('click',refresh);$('#sheetClose').addEventListener('click',closeSheet);$('#sheetBackdrop').addEventListener('click',closeSheet);
- $('#periodButtons').addEventListener('click',e=>{const el=e.target.closest('[data-period]');if(el){state.period=el.dataset.period;loadSheet();}});
+ $('#periodButtons').addEventListener('click',e=>{const el=e.target.closest('[data-period]');if(el&&state.period!==el.dataset.period){state.period=el.dataset.period;loadSheet();}});
+ $('#historyChart').addEventListener('click',e=>{if(e.target.closest('[data-sheet-retry]'))loadSheet();});
+ document.addEventListener('click',e=>{const b=e.target.closest('[data-retry-resource]');if(b)fetchResource(b.dataset.retryResource);});
  $('#legendBox').addEventListener('click',e=>{const el=e.target.closest('[data-series]');if(!el)return;state[el.dataset.series]=!state[el.dataset.series];if(!state.main&&!state.secondary)state.main=true;renderSheet();});
  $('#eventsFilter').addEventListener('click',()=>{state.filter=state.filter==='all'?'warning':'all';$('#eventsFilter').textContent=state.filter==='all'?'Todos':'Avisos';renderSheet();});
  $('#exportCsv').addEventListener('click',exportSummary);$('#infoBtn').addEventListener('click',()=>openSheet('integrations'));
