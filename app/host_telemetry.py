@@ -45,6 +45,8 @@ class HostMonitor:
         self.identity=None;self.history_error=None
         self.agent_nonce=secrets.token_hex(16)
         self.history_cache={};self.history_lock=threading.Lock()
+        self.history_key_locks={};self.history_slots=threading.BoundedSemaphore(2)
+        self.history_generation=0
     def start(self):
         if self.thread is None:
             self.thread=threading.Thread(target=self.loop,name='host-telemetry',daemon=True);self.thread.start()
@@ -278,6 +280,10 @@ class HostMonitor:
             db.execute('INSERT INTO host_samples VALUES (?,?)',(stamp,json.dumps(s,allow_nan=False)))
             # Unlimited retention: chart aggregation never replaces original records.
             db.execute('PRAGMA user_version=2')
+        # Only ephemeral aggregation is invalidated, never the original SD archive.
+        with self.history_lock:
+            self.history_generation+=1
+            self.history_cache.clear()
     def archive(self,after=0,limit=100):
         import math
         try:after=float(after);limit=int(limit)
@@ -302,10 +308,25 @@ class HostMonitor:
         key=(metric,range_name)
         with self.history_lock:
             cached=self.history_cache.get(key)
-            if cached and time.monotonic()-cached[0]<60:return copy.deepcopy(cached[1])
-            result=self.query_history(metric,range_name)
-            if len(self.history_cache)>=64:self.history_cache.clear()
-            self.history_cache[key]=(time.monotonic(),result)
+            if cached and cached[1]==self.history_generation and time.monotonic()-cached[0]<60:
+                return copy.deepcopy(cached[2])
+            per_key=self.history_key_locks.setdefault(key,threading.Lock())
+        # Identical requests share one calculation; unrelated metrics do not share the same lock.
+        with per_key:
+            with self.history_lock:
+                cached=self.history_cache.get(key)
+                if cached and cached[1]==self.history_generation and time.monotonic()-cached[0]<60:
+                    return copy.deepcopy(cached[2])
+                generation=self.history_generation
+            # Protect SD I/O with at most two distinct concurrent read queries.
+            with self.history_slots:
+                result=self.query_history(metric,range_name)
+            with self.history_lock:
+                if generation==self.history_generation:
+                    if len(self.history_cache)>=56:
+                        oldest=min(self.history_cache,key=lambda k:self.history_cache[k][0])
+                        del self.history_cache[oldest]
+                    self.history_cache[key]=(time.monotonic(),generation,result)
             return copy.deepcopy(result)
     def query_history(self,metric,range_name):
         if metric not in METRICS or range_name not in RANGES:raise ValueError('Métrica ou intervalo inválido')
