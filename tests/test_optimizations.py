@@ -75,6 +75,22 @@ class BackendOptimizations(unittest.TestCase):
         self.assertEqual(new['quality']['sample_count'],128)
         self.assertLessEqual(len(historian._overview_cache),historian._OVERVIEW_MAX)
         with self.assertRaises(ValueError):historian.overview_history('24h','private')
+    def test_four_router_clients_share_one_full_aggregate(self):
+        self.seed_router()
+        with historian._overview_mutex:historian._overview_cache.clear()
+        original=historian._overview_history_uncached
+        calls=[]
+        def aggregate(period):
+            calls.append(period)
+            time.sleep(.06)
+            return original(period)
+        with patch.object(historian,'_overview_history_uncached',side_effect=aggregate):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                jobs=[pool.submit(historian.overview_history,'24h','full') for _ in range(4)]
+                result=[job.result() for job in jobs]
+            self.assertEqual(len(calls),1)
+            self.assertEqual([v['quality']['sample_count'] for v in result],[127]*4)
+
     def test_concurrent_identical_host_history_one_query_and_new_persist_invalidates(self):
         monitor=HostMonitor(Path(self.temp.name)/'fixture.db')
         sample=empty_snapshot()
