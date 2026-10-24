@@ -141,6 +141,7 @@ _OVERVIEW_MAX=12
 _overview_cache=OrderedDict()
 _overview_locks={}
 _overview_mutex=threading.Lock()
+_overview_slots=threading.BoundedSemaphore(2)
 
 def _revision(db):
     return tuple(db.execute('SELECT COALESCE(MAX(id),0) FROM '+table).fetchone()[0]
@@ -228,7 +229,9 @@ def overview_history(period='24h',view='full'):
             if cached and cached[1]==revision and now-cached[0]<_OVERVIEW_TTL:
                 _overview_cache.move_to_end(key)
                 return cached[2]
-        result=overview_summary(period) if view=='summary' else _overview_history_uncached(period)
+        # At most two distinct cache misses can read the SQLite volume concurrently.
+        with _overview_slots:
+            result=overview_summary(period) if view=='summary' else _overview_history_uncached(period)
         with core.connect() as db:end_revision=_revision(db)
         # If a collector wrote during this read, don't cache an inconsistent version.
         if end_revision==revision:
