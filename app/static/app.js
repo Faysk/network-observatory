@@ -45,6 +45,9 @@ async function sheetBundle(period,signal){
  const cached=cachedFullBundle(period);
  if(cached)return cached;
  let flight=sheetFlights.get(period);
+ // A previous consumer may have aborted this flight before its finally ran.
+ // A new visit needs a fresh request rather than inheriting AbortError.
+ if(flight?.controller.signal.aborted){sheetFlights.delete(period);flight=null;}
  if(!flight){
    const controller=new AbortController(),consumers=new Set();
    const pending=api('/api/v1/overview?period='+encodeURIComponent(period),{signal:controller.signal})
