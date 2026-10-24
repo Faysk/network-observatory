@@ -209,7 +209,7 @@ def overview_summary(period='24h'):
 def overview_history(period='24h',view='full'):
     if view not in ('full','summary'):raise ValueError('Invalid overview view')
     if period not in PERIODS:raise ValueError('Invalid period')
-    key=(period,view)
+    key=(str(core.DB_PATH.resolve()),period,view)
     with core.connect() as db:revision=_revision(db)
     now=time.monotonic()
     with _overview_mutex:
