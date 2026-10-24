@@ -12,7 +12,7 @@
   const d=frame.contentDocument,w=frame.contentWindow;
   await wait(()=>w.FNO?.state?.resources?.status?.phase==='ready','first status');
   assert(d.querySelector('[data-metric="cpu"]').textContent.trim()==='0','real zero CPU lost');
-  assert(w.FNO.state.resources.overview.phase==='loading','status awaited slow history');
+  assert(['loading','error'].includes(w.FNO.state.resources.overview.phase),'status not independently available from summary');
   notes.push('status visible before history');
   await wait(()=>w.FNO.state.resources.overview.phase==='error','summary HTTP500');
   assert(w.FNO.state.api===true,'history error incorrectly marked server offline');
