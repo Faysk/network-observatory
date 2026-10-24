@@ -23,12 +23,24 @@ O adaptador opcional `python -m app.adapters.huawei_b7 --help` foi desenvolvido 
 - O Vault é separado: https://github.com/Faysk/docs-vault . Para a integração `/valt/`, disponibilize seu frontend em `sites/valt/` local, ignorado pelo Git; mantenha dados reais privados.
 - O painel S7 independente: https://github.com/Faysk/s7-edge-observatory .
 
+## Otimizações de histórico e HTTP — issues #1 a #4
+
+- `GET /api/v1/overview?period=24h&view=summary`: **resumo da home**. Cobertura e contagem de amostras exatas, minigráficos com observações reais limitadas por janela, até três eventos. Não substitui médias/extremos; consulte `view=full` (o padrão original) para históricos detalhados.
+- `GET /api/v1/overview?period=24h`: formato completo compatível; cache em RAM, TTL de 20 s, 12 entradas e invalidação por nova coleta (IDs máximos em SQLite).
+- Históricos S7 por métrica/período: solicitações simultâneas idênticas calculadas uma vez e leituras simultâneas do SQLite limitadas a duas, com invalidação após gravar no microSD.
+- HTTP: JS/CSS/SVG/woff2 de código público (até 512 KiB) usam ETag, Last-Modified e revalidação 304; gzip seletivo para JS/CSS/SVG suficientemente compressíveis. **Sem cache público, immutable ou service worker**. HTML, API, JSON, conteúdo privado e `/valt/` continuam `no-store`.
+- Home carrega status, resumo e inventário em paralelo com erros/retry por secção. O painel atualiza imediatamente período/legenda, cancela consultas obsoletas e só habilita exportação para bundle válido.
+
+**Não foi realizado deploy no S7.** Consulte [o relatório de aceite](docs/QA_ACCEPTANCE.md): benchmarks sintéticos e testes automatizados **não** substituem medições de LAN, carga do microSD, validação no Android 8 ou sincronização futura com o frontend S7 independente.
+
 ## Validação
 
 ```sh
 python -m unittest discover -s tests -v
+python tools/bench_histories.py --samples-per-day 30
 node tests/test_s7_ui.cjs
 node --check app/static/app.js
+node tests/browser_smoke.cjs # requer Chrome ou Chromium
 ```
 
 ## Limites e privacidade
