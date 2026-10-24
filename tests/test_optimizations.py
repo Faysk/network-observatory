@@ -103,6 +103,10 @@ class BackendOptimizations(unittest.TestCase):
 class SafeStaticHttp(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.temp=tempfile.TemporaryDirectory()
+        cls.old=core.DB_PATH
+        core.DB_PATH=Path(cls.temp.name)/'http-fixture.db'
+        core.init_db()
         cls.server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
         cls.thread=threading.Thread(target=cls.server.serve_forever,daemon=True)
         cls.thread.start()
@@ -110,6 +114,8 @@ class SafeStaticHttp(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.server.shutdown();cls.server.server_close();cls.thread.join(3)
+        core.DB_PATH=cls.old
+        cls.temp.cleanup()
     def get(self,path,headers=None,method='GET'):
         request=urllib.request.Request(self.origin+path,headers=headers or {},method=method)
         try:
