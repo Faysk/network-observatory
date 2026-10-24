@@ -7,7 +7,9 @@ const time=v=>v?new Date(v).toLocaleString('pt-PT',{day:'2-digit',month:'short',
 const retention=days=>days===0?'Sem limite':days==null?'Sem informação':fmt(days,0)+' dias';
 const fresh=ts=>{const age=Date.now()-Date.parse(ts);return age>=-5000&&age<=180000;};
 const duration=v=>v==null?'Sem dados':`${Math.floor(v/3600)}h ${Math.floor(v%3600/60)}m`;
-const state={status:null,overview:null,clients:[],metric:null,period:'24h',bundle:null,filter:'all',main:true,secondary:true,request:0,api:false};
+const state={status:null,overview:null,clients:[],metric:null,period:'24h',bundle:null,filter:'all',main:true,secondary:true,request:0,api:false,resources:{
+ status:{phase:'idle'},overview:{phase:'idle'},inventory:{phase:'idle'}
+ }};
 const config={
  traffic:{title:'Contadores WAN',desc:'Bytes cumulativos reportados. Não são consumo do período nem velocidade de Internet.',a:'wan_rx_bytes',b:'wan_tx_bytes',main:'RX reportado',secondary:'TX reportado',unit:'GiB',scale:2**30},
  router:{title:'Router Huawei',desc:'CPU e memória reais; temperatura óptica não é temperatura da CPU.',a:'cpu_pct',b:'memory_pct',main:'CPU',secondary:'RAM',unit:'%',scale:1},
@@ -18,7 +20,96 @@ const config={
  events:{title:'Eventos e logs',desc:'Eventos persistidos pela aplicação. Logs internos do router não são recolhidos.',a:null,b:null,main:'Eventos',unit:'',scale:1},
  integrations:{title:'Integrações e fontes',desc:'Estados derivados das últimas leituras recebidas, sem introdução de tokens no navegador.',a:null,b:null,main:'Fontes',unit:'',scale:1}
 };
-async function api(url){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);try{const r=await fetch(url,{signal:controller.signal});if(!r.ok)throw Error('Resposta '+r.status);return await r.json();}finally{clearTimeout(timer);}}
+async function api(url,{signal,timeout=20000}={}){
+ const controller=new AbortController(),relay=()=>controller.abort();
+ if(signal){if(signal.aborted)controller.abort();else signal.addEventListener('abort',relay,{once:true});}
+ const timer=setTimeout(()=>controller.abort(),timeout);
+ try{const r=await fetch(url,{signal:controller.signal,cache:'no-store'});
+   if(!r.ok)throw Error('Resposta '+r.status);
+   return await r.json();
+ }finally{clearTimeout(timer);signal?.removeEventListener('abort',relay);}
+}
+const bundleCache=new Map(),sheetFlights=new Map(),BUNDLE_TTL=20000;
+let activeSheetAbort=null;
+function abortSheet(){
+ if(activeSheetAbort){activeSheetAbort.abort();activeSheetAbort=null;}
+}
+function cachedFullBundle(period){
+ const cached=bundleCache.get(period);
+ if(cached&&Date.now()-cached.at<BUNDLE_TTL)return cached.data;
+ // A legacy fully-loaded home bundle may be reused; a summary cannot.
+ if(period==='24h'&&state.overview?.stats&&state.overview?.probes&&state.overview?.series)return state.overview;
+ return null;
+}
+async function sheetBundle(period,signal){
+ const cached=cachedFullBundle(period);
+ if(cached)return cached;
+ let flight=sheetFlights.get(period);
+ if(!flight){
+   const controller=new AbortController(),consumers=new Set();
+   const pending=api('/api/v1/overview?period='+encodeURIComponent(period),{signal:controller.signal})
+     .then(data=>{
+       if(!data||!data.period||!data.stats||!Array.isArray(data.series))throw Error('Histórico inválido');
+       bundleCache.set(period,{at:Date.now(),data});
+       while(bundleCache.size>4)bundleCache.delete(bundleCache.keys().next().value);
+       return data;
+     }).finally(()=>{if(sheetFlights.get(period)?.pending===pending)sheetFlights.delete(period)});
+   flight={pending,controller,consumers};sheetFlights.set(period,flight);
+ }
+ const token={};flight.consumers.add(token);
+ const release=()=>{
+   flight.consumers.delete(token);
+   if(!flight.consumers.size&&sheetFlights.get(period)===flight)flight.controller.abort();
+ };
+ if(signal?.aborted){release();throw new DOMException('Cancelled','AbortError')}
+ signal?.addEventListener('abort',release,{once:true});
+ try{return await flight.pending}
+ finally{signal?.removeEventListener('abort',release);release();}
+}
+function resourceMarkup(name,label){
+ const meta=state.resources[name],phase=meta.phase,old=phase==='stale';
+ const retry=phase==='error'||phase==='stale';
+ const message=phase==='loading'?'A carregar '+label+'…':phase==='error'?'Falha ao carregar '+label+'.':old?'Última leitura preservada, mas a atualização falhou.':phase==='empty'?'Não foram encontrados dados de '+label+'.':'';
+ return message?'<span>'+esc(message)+'</span>'+(retry?' <button type="button" data-retry-resource="'+name+'">Tentar novamente</button>':''):'';
+}
+function updateResourceRegions(){
+ for(const [name,id,label] of [['overview','#overviewState','histórico'],['inventory','#inventoryState','inventário']]){
+   const el=$(id);if(!el)continue;
+   const phase=state.resources[name].phase;
+   el.dataset.phase=phase;el.setAttribute('aria-busy',String(phase==='loading'));
+   el.innerHTML=resourceMarkup(name,label);
+ }
+ const chartNode=$('#overviewChart');if(chartNode)chartNode.setAttribute('aria-busy',String(state.resources.overview.phase==='loading'));
+}
+function publishResource(name,data){
+ if(name==='status'){state.status=data;state.api=true;}
+ if(name==='overview')state.overview=data;
+ if(name==='inventory')state.clients=data.clients;
+ const isEmpty=name==='overview'?!(data.series?.length||data.probes?.length||data.events?.length):
+   name==='inventory'?!data.clients?.length:false;
+ state.resources[name]={phase:isEmpty?'empty':'ready',at:Date.now()};
+ renderHome();updateResourceRegions();
+}
+async function fetchResource(name){
+ state.resources[name]={...state.resources[name],phase:'loading'};
+ updateResourceRegions();
+ try{
+   const path={status:'/api/status',overview:'/api/v1/overview?period=24h&view=summary',
+                inventory:'/api/router/clients'}[name];
+   const data=await api(path);
+   if(name==='inventory'&&!Array.isArray(data?.clients))throw Error('Inventário inválido');
+   if(name==='overview'&&(!data?.period||!Array.isArray(data.series)))throw Error('Resumo inválido');
+   publishResource(name,data);
+   return true;
+ }catch(error){
+   if(name==='status')state.api=false;
+   const had=name==='status'?!!state.status:name==='overview'?!!state.overview:state.resources.inventory.at!=null;
+   state.resources[name]={phase:had?'stale':'error',at:state.resources[name].at||null,error:String(error)};
+   renderHome();updateResourceRegions();
+   return false;
+ }
+}
+
 function toast(message){$('#toast').textContent=message;$('#toast').classList.add('visible');clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#toast').classList.remove('visible'),4500);}
 function tile(label,value,unit='',foot=''){return `<article class="d-stat"><div class="d-stat-label">${esc(label)}</div><strong>${esc(value)} <small>${esc(unit)}</small></strong><span>${esc(foot)}</span></article>`;}
 function keyvals(rows){return `<div class="d-keyvals">${rows.map(([k,v])=>`<div class="d-keyval"><small>${esc(k)}</small><strong>${esc(v??'Sem dados')}</strong></div>`).join('')}</div>`;}
@@ -95,7 +186,18 @@ function renderHome(){
  ['traffic','latency','router','devices'].forEach(metric=>{const c=config[metric],rows=c.probes?o?.probes:o?.series,node=$('#spark-'+metric);node.replaceChildren();const vals=(rows||[]).map(r=>r[c.a]).filter(Number.isFinite);if(vals.length<2)return;let min=Math.min(...vals),max=Math.max(...vals),previous=null;const points=(rows||[]).map(r=>{const v=r[c.a];if(!Number.isFinite(v)){previous=null;return '';}const gap=!previous||Date.parse(r.timestamp)-Date.parse(previous.timestamp_end||previous.timestamp)>180000||r.max_gap_seconds>180;const x=(Date.parse(r.timestamp)-Date.parse(o.period.from))/Math.max(1,Date.parse(o.period.to)-Date.parse(o.period.from))*108;const segment=`${gap?'M':'L'}${x},${24-(v-min)/Math.max(1,max-min)*20}`;previous=r;return segment;}).join(' ');node.innerHTML=`<path d="${points}" fill="none" stroke="${metric==='latency'?'#d0a7ff':'#7de6c4'}" stroke-width="2"/>`;});
  document.dispatchEvent(new CustomEvent('fno:update'));
 }
-async function refresh(){if(state.refreshing)return;state.refreshing=true;document.body.classList.add('is-loading');$('#modeToggle').disabled=true;$('#modeToggle').setAttribute('aria-busy','true');try{const [status,overview,inventory]=await Promise.all([api('/api/status'),api('/api/v1/overview?period=24h'),api('/api/router/clients')]);state.status=status;state.overview=overview;state.clients=inventory.clients;state.api=true;renderHome();if(state.metric)await loadSheet();}catch(e){state.api=false;renderHome();toast('Recolha local indisponível: '+e.message);}finally{state.refreshing=false;document.body.classList.remove('is-loading');$('#modeToggle').disabled=false;$('#modeToggle').setAttribute('aria-busy','false');}}
+async function refresh(){
+ if(state.refreshing||document.hidden)return;
+ state.refreshing=true;document.body.classList.add('is-loading');
+ $('#modeToggle').disabled=true;$('#modeToggle').setAttribute('aria-busy','true');
+ try{
+   // Publish status before any slower aggregate or inventory returns.
+   await Promise.allSettled(['status','overview','inventory'].map(name=>fetchResource(name)));
+ }finally{
+   state.refreshing=false;document.body.classList.remove('is-loading');
+   $('#modeToggle').disabled=false;$('#modeToggle').setAttribute('aria-busy','false');
+ }
+}
 function integrationPanel(){const s=state.status,h=s?.huawei||{},probe=s?.probe,partial=Object.entries(h.sections||{}).filter(([k,v])=>k!=='router_logs'&&v!=='ok').map(([k])=>k);return keyvals([
  ['Huawei HTTP',state.api&&h.quality==='ok'?(partial.length?'Parcial ('+partial.join(', ')+') · ':'Ativo · ')+time(h.collected_at):'Sem leitura recente'],
  ['Sondas TCP',state.api&&probe&&fresh(probe.ts)?'Ativas · '+time(probe.ts):'Sem leitura recente'],
