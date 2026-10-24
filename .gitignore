@@ -1,0 +1,67 @@
+# Credentials and private configuration
+.env
+.env.*
+!.env.example
+login.txt
+login.*.txt
+*credentials*
+*secret*.json
+*.pem
+*.key
+*.p12
+*.pfx
+.ssh/
+# Runtime and captured data
+/data/
+/config/
+/logs/
+/backups/
+/deploy-host/
+/sites/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.log
+*.har
+*.pcap
+*.pcapng
+# Local reports, screenshots and archives
+/previews/
+/private/
+/local/
+/public-repositories/
+*.zip
+*.tar
+*.tar.gz
+*.7z
+*.bak
+*.orig
+# Tool caches and machine state
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+node_modules/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Personal documents and screenshots need explicit review before publication
+*.pdf
+*.doc
+*.docx
+*.odt
+*.xls
+*.xlsx
+*.ods
+*.png
+*.jpg
+*.jpeg
+*.heic
+*.mp4
+*.mov
+*.wav
+*.mp3

@@ -1,0 +1,150 @@
+/* Original local API integration for the supplied v0.4 design. No demo generators. */
+'use strict';
+const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt=(v,d=1)=>v==null||!Number.isFinite(Number(v))?'—':Number(v).toLocaleString('pt-PT',{maximumFractionDigits:d});
+const time=v=>v?new Date(v).toLocaleString('pt-PT',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'Sem dados';
+const retention=days=>days===0?'Sem limite':days==null?'Sem informação':fmt(days,0)+' dias';
+const fresh=ts=>{const age=Date.now()-Date.parse(ts);return age>=-5000&&age<=180000;};
+const duration=v=>v==null?'Sem dados':`${Math.floor(v/3600)}h ${Math.floor(v%3600/60)}m`;
+const state={status:null,overview:null,clients:[],metric:null,period:'24h',bundle:null,filter:'all',main:true,secondary:true,request:0,api:false};
+const config={
+ traffic:{title:'Contadores WAN',desc:'Bytes cumulativos reportados. Não são consumo do período nem velocidade de Internet.',a:'wan_rx_bytes',b:'wan_tx_bytes',main:'RX reportado',secondary:'TX reportado',unit:'GiB',scale:2**30},
+ router:{title:'Router Huawei',desc:'CPU e memória reais; temperatura óptica não é temperatura da CPU.',a:'cpu_pct',b:'memory_pct',main:'CPU',secondary:'RAM',unit:'%',scale:1},
+ latency:{title:'Desempenho e conectividade',desc:'Tempo de ligação TCP do servidor ao gateway e a 1.1.1.1:443. Não é ping, DNS ou teste de velocidade.',a:'router_ms',b:'internet_ms',main:'TCP gateway',secondary:'TCP exterior',unit:'ms',scale:1,probes:true},
+ devices:{title:'Presença dos aparelhos',desc:'Aparelhos reportados online em cada amostra. Ausência na tabela não prova desconexão.',a:'online_clients',b:null,main:'Online reportados',unit:'aparelhos',scale:1},
+ wifi:{title:'Wi-Fi e sinal',desc:'RSSI médio das estações observadas pelo AP, sem inferir qualidade de Internet.',a:'rssi_dbm',b:null,main:'RSSI médio reportado',unit:'dBm',scale:1},
+ health:{title:'Estado da recolha e conectividade',desc:'Observações de resposta TCP, sem pontuação sintética de experiência.',a:'router_online',b:'internet_online',main:'Gateway responde',secondary:'Exterior responde',unit:'0/1',scale:1,probes:true},
+ events:{title:'Eventos e logs',desc:'Eventos persistidos pela aplicação. Logs internos do router não são recolhidos.',a:null,b:null,main:'Eventos',unit:'',scale:1},
+ integrations:{title:'Integrações e fontes',desc:'Estados derivados das últimas leituras recebidas, sem introdução de tokens no navegador.',a:null,b:null,main:'Fontes',unit:'',scale:1}
+};
+async function api(url){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);try{const r=await fetch(url,{signal:controller.signal});if(!r.ok)throw Error('Resposta '+r.status);return await r.json();}finally{clearTimeout(timer);}}
+function toast(message){$('#toast').textContent=message;$('#toast').classList.add('visible');clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#toast').classList.remove('visible'),4500);}
+function tile(label,value,unit='',foot=''){return `<article class="d-stat"><div class="d-stat-label">${esc(label)}</div><strong>${esc(value)} <small>${esc(unit)}</small></strong><span>${esc(foot)}</span></article>`;}
+function keyvals(rows){return `<div class="d-keyvals">${rows.map(([k,v])=>`<div class="d-keyval"><small>${esc(k)}</small><strong>${esc(v??'Sem dados')}</strong></div>`).join('')}</div>`;}
+function empty(message){return `<div class="d-fallback">${esc(message)}</div>`;}
+function chart(node,series,defs,period,selection){
+ node.replaceChildren();const valid=series.filter(p=>defs.some(d=>Number.isFinite(p[d.key])));
+ if(!valid.length){node.innerHTML=empty('Sem amostras desta métrica no período selecionado.');return;}
+ const width=800,height=245,left=58,right=16,top=22,bottom=32;
+ const start=Date.parse(period.from),end=Date.parse(period.to),step=period.resolution_seconds||60;
+ const nums=series.flatMap(p=>defs.flatMap(d=>{const v=p.values?.[d.key];return [p[d.key],v?.min,v?.max].filter(Number.isFinite).map(x=>x/(d.scale||1));}));
+ let low=Math.min(...nums),high=Math.max(...nums);const pad=Math.max(1,(high-low)*.12);low-=pad;high+=pad;if(defs.some(d=>d.key==='presence')){low=0;high=100;}if(defs.some(d=>d.key==='router_online'||d.key==='internet_online')){low=0;high=1;}
+ const percent=defs.every(d=>['cpu_pct','memory_pct','presence'].includes(d.key));if(percent){low=Math.max(0,low);high=Math.min(100,high);}else if(defs.every(d=>d.key!=='rssi_dbm'))low=Math.max(0,low);if(high<=low)high=low+1;
+ const x=t=>left+(Date.parse(t)-start)/Math.max(1,end-start)*(width-left-right), y=v=>top+(1-(v-low)/(high-low))*(height-top-bottom);
+ let content='';for(let i=0;i<5;i++){const yy=top+i*(height-top-bottom)/4;content+=`<line x1="${left}" x2="${width-right}" y1="${yy}" y2="${yy}" stroke="#304558" stroke-dasharray="3 5"/><text x="${left-8}" y="${yy+4}" text-anchor="end" fill="#91a7ba" font-size="11">${fmt(high-i*(high-low)/4)}</text>`;}
+ for(let i=0;i<4;i++){const t=start+i*(end-start)/3;content+=`<text x="${left+i*(width-left-right)/3}" y="${height-6}" text-anchor="${i===0?'start':i===3?'end':'middle'}" fill="#91a7ba" font-size="11">${esc(time(new Date(t).toISOString()))}</text>`;}
+ defs.forEach(d=>{let path='',previous=null;series.forEach(p=>{const value=p[d.key];if(!Number.isFinite(value)){previous=null;return;}const incomplete=p.max_gap_seconds>180||(p.values?.[d.key]?.sample_count<p.sample_count);if(incomplete)previous=null;
+ const gap=previous&&Date.parse(p.timestamp)-Date.parse(previous.timestamp_end||previous.timestamp)>180000;
+ const xx=x(p.timestamp),yy=y(value/(d.scale||1));path+=`${previous&&!gap?'L':'M'}${xx.toFixed(2)},${yy.toFixed(2)} `;
+ const extrema=p.values?.[d.key];if(extrema&&extrema.min!==extrema.max)content+=`<line x1="${xx}" x2="${xx}" y1="${y(extrema.min/(d.scale||1))}" y2="${y(extrema.max/(d.scale||1))}" stroke="${d.color}" opacity=".35"/>`;
+ content+=`<circle cx="${xx}" cy="${yy}" r="2" fill="${d.color}"/>`;previous=incomplete?null:p;});content+=`<path d="${path}" fill="none" stroke="${d.color}" stroke-width="2.2"/>`;});
+ node.innerHTML=`<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Histórico real com intervalos sem amostras">${content}<line class="inspect-line" x1="0" x2="0" y1="${top}" y2="${height-bottom}" stroke="#c5eadd" opacity="0"/><rect class="inspect-area" x="${left}" y="${top}" width="${width-left-right}" height="${height-top-bottom}" fill="transparent" tabindex="0" role="img" aria-label="Inspecionar amostras com setas esquerda e direita"/></svg>`;
+ const area=$('.inspect-area',node),line=$('.inspect-line',node),svg=area.ownerSVGElement;let index=valid.length-1;
+ node.classList.add('interactive-chart');
+ const tip=document.createElement('div');tip.className='chart-inspector';tip.hidden=true;tip.setAttribute('role','tooltip');node.append(tip);
+ const markers=document.createElementNS('http://www.w3.org/2000/svg','g');markers.setAttribute('pointer-events','none');svg.insertBefore(markers,area);
+ function hide(){tip.hidden=true;line.setAttribute('opacity','0');markers.replaceChildren();}
+ function inspect(i){index=Math.max(0,Math.min(valid.length-1,i));const p=valid[index],xx=x(p.timestamp);
+ line.setAttribute('x1',xx);line.setAttribute('x2',xx);line.setAttribute('opacity','1');line.setAttribute('stroke-dasharray','4 5');
+ markers.innerHTML=defs.filter(d=>Number.isFinite(p[d.key])).map(d=>`<circle cx="${xx}" cy="${y(p[d.key]/(d.scale||1))}" r="5" fill="${d.color}" stroke="#161021" stroke-width="2"/>`).join('');
+ const stamp=new Date(p.timestamp).toLocaleString('pt-PT',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+ tip.innerHTML=`<strong class="inspector-time">${esc(stamp)}</strong>${defs.map(d=>{const v=p[d.key],stats=p.values?.[d.key];return `<div class="inspector-row"><span><svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="3.5" fill="${d.color}"/></svg>${esc(d.label)}</span><b>${Number.isFinite(v)?esc(fmt(v/(d.scale||1),3)):'Sem dados'} <small>${esc(d.unit||'')}</small></b></div>${stats&&stats.min!==stats.max?`<div class="inspector-range">Mín. ${esc(fmt(stats.min/(d.scale||1),3))} · Máx. ${esc(fmt(stats.max/(d.scale||1),3))} ${esc(d.unit||'')}</div>`:''}`;}).join('')}<span class="inspector-meta">${esc(p.sample_count??1)} amostras · média do intervalo${p.max_gap_seconds>180?' · contém lacuna':''}</span>`;
+ tip.hidden=false;
+ // Use the actual SVG matrix: aspect-ratio letterboxing must not offset the cursor.
+ const point=svg.createSVGPoint();point.x=xx;point.y=top;const screen=point.matrixTransform(svg.getScreenCTM()),box=node.getBoundingClientRect();
+ const pos=screen.x-box.left;tip.style.left=Math.max(8,Math.min(box.width-tip.offsetWidth-8,pos+16>box.width-tip.offsetWidth?pos-tip.offsetWidth-16:pos+16))+'px';tip.style.top=Math.max(4,screen.y-box.top+8)+'px';
+ if(selection)selection.textContent=`${stamp} · ${defs.map(d=>`${d.label}: ${fmt(p[d.key]==null?null:p[d.key]/(d.scale||1),3)} ${d.unit||''}`).join(' · ')} · ${p.sample_count??1} amostras · média do intervalo`;
+ }
+ function pointer(e){const matrix=svg.getScreenCTM();if(!matrix)return;const point=svg.createSVGPoint();point.x=e.clientX;point.y=e.clientY;const local=point.matrixTransform(matrix.inverse()),t=start+Math.max(0,Math.min(1,(local.x-left)/(width-left-right)))*(end-start);let best=0;
+ for(let i=1;i<valid.length;i++)if(Math.abs(Date.parse(valid[i].timestamp)-t)<Math.abs(Date.parse(valid[best].timestamp)-t))best=i;
+ const containing=valid.findIndex(p=>t>=Date.parse(p.timestamp)&&t<=Date.parse(p.timestamp_end||p.timestamp)+30000);if(containing>=0)best=containing;const p=valid[best],from=Date.parse(p.timestamp),to=Date.parse(p.timestamp_end||p.timestamp)+30000;
+ if(t<from-30000||t>to){hide();if(selection)selection.textContent='Sem amostras nesta posição do período.';return;}inspect(best);
+ }
+ area.addEventListener('pointermove',pointer);area.addEventListener('pointerdown',pointer);
+ area.addEventListener('pointerleave',()=>{if(document.activeElement!==area)hide();});area.addEventListener('blur',hide);
+ area.addEventListener('focus',()=>inspect(index));area.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','Home','End','Escape'].includes(e.key)){e.preventDefault();if(e.key==='Escape'){hide();return;}inspect(e.key==='Home'?0:e.key==='End'?valid.length-1:index+(e.key==='ArrowRight'?1:-1));}});
+}
+function appOnline(){return state.api?state.clients.filter(c=>c.quality==='ok'&&c.reported_status==='Online').length:null;}
+function renderHome(){
+ const s=state.status,h=s?.huawei||{},current=state.api&&h.quality==='ok'&&fresh(h.collected_at),m=current?h.metrics||{}:{},o=state.overview;
+ const probe=s?.probe,probeCurrent=state.api&&probe&&fresh(probe.ts);
+ $('.demo-chip').textContent=current?'● RECOLHA ATIVA':'● SEM LEITURA RECENTE';
+ $('.notice>span').textContent=current?`Leitura real · ${time(h.collected_at)} · Retenção: ${retention(s.retention_days)} · origem ${h.source}`:'Sem leitura recente. Os valores atuais ficam indisponíveis; o histórico continua preservado.';
+ $('.local-status small').textContent=current?'Coletor Huawei ativo':'A aguardar coletor';
+ $('#health-title').textContent=current?'A tua rede, em observação.':'A aguardar telemetria.';
+ $('.hero-main p').textContent=probeCurrent?`Gateway: ${probe.router_online==null?'sem dados':probe.router_online?'responde':'sem resposta TCP'} · exterior: ${probe.internet_online==null?'sem dados':probe.internet_online?'responde':'sem resposta TCP'}.`:'Sem sondas TCP recentes para avaliar a conectividade.';
+ const coverage=o?.quality?.coverage_percent;
+ $('[data-metric="score"]').textContent=fmt(coverage,1);$('.quality-dial strong').textContent=fmt(coverage,1);
+ $('.ring-fill').style.strokeDashoffset=String(2*Math.PI*49*(1-(coverage||0)/100));$('.dial-value').style.strokeDashoffset=String(2*Math.PI*37*(1-(coverage||0)/100));
+ $('.score-copy>strong').textContent=`${fmt(o?.quality?.sample_count,0)} amostras`;
+ $('.hero-score .score-ring').setAttribute('aria-label',`Cobertura da recolha: ${fmt(coverage)} por cento`);
+ let wan=current?Object.entries(h.wan_states||{}).find(([,v])=>v.services?.includes('Internet'))?.[0]:null;
+ const counters=wan?h.interfaces?.[wan]:null;
+ $('[data-metric="down"]').textContent=fmt(counters?.rx_bytes==null?null:counters.rx_bytes/2**30,2);
+ $('[data-metric="latency"]').textContent=fmt(probeCurrent?probe.router_ms:null);
+ $('[data-metric="cpu"]').textContent=fmt(m.cpu_pct);
+ const online=appOnline();
+ $('[data-metric="devices"]').textContent=fmt(online,0);$('[data-metric="devices"]').nextElementSibling.textContent='/ '+state.clients.length;
+ $('.traffic-summary-values').innerHTML=`<div><span class="label-with-dot"><i class="series-dot download"></i> RX REPORTADO</span><strong>${fmt(counters?.rx_bytes==null?null:counters.rx_bytes/2**30,2)} <small>GiB</small></strong></div><div><span class="label-with-dot"><i class="series-dot upload"></i> TX REPORTADO</span><strong>${fmt(counters?.tx_bytes==null?null:counters.tx_bytes/2**30,2)} <small>GiB</small></strong></div><div class="mini-time">${esc(time(h.collected_at))}</div>`;
+ if(o)chart($('#overviewChart'),o.series,[{key:'wan_rx_bytes',label:'RX acumulado',color:'#c3a4ff',scale:2**30,unit:'GiB'},{key:'wan_tx_bytes',label:'TX acumulado',color:'#69e9dc',scale:2**30,unit:'GiB'}],o.period);
+ $('.axis-row').hidden=true;
+ $('.signal-foot').innerHTML=`<span>TCP gateway<strong>${fmt(probeCurrent?probe.router_ms:null)} ms</strong></span><span>Perda ICMP<strong>Sem dados</strong></span><span>DNS<strong>Sem dados</strong></span>`;
+ const events=o?.events||[];$('.nav-number').textContent=String(events.length);
+ $('.event-preview').innerHTML=events.length?events.slice(0,3).map(e=>`<button class="event-line event-open" data-event="${e.id}"><span class="event-dot ${e.severity==='warning'||e.severity==='critical'?'amber-dot':'mint-dot'}"></span><span><strong>${esc(e.title)}</strong><small>${esc(time(e.ts))}</small></span><span class="event-pill neutral-pill">${esc(e.severity)}</span></button>`).join(''):empty('Sem eventos registados nesta janela.');
+ ['traffic','latency','router','devices'].forEach(metric=>{const c=config[metric],rows=c.probes?o?.probes:o?.series,node=$('#spark-'+metric);node.replaceChildren();const vals=(rows||[]).map(r=>r[c.a]).filter(Number.isFinite);if(vals.length<2)return;let min=Math.min(...vals),max=Math.max(...vals),previous=null;const points=(rows||[]).map(r=>{const v=r[c.a];if(!Number.isFinite(v)){previous=null;return '';}const gap=!previous||Date.parse(r.timestamp)-Date.parse(previous.timestamp_end||previous.timestamp)>180000||r.max_gap_seconds>180;const x=(Date.parse(r.timestamp)-Date.parse(o.period.from))/Math.max(1,Date.parse(o.period.to)-Date.parse(o.period.from))*108;const segment=`${gap?'M':'L'}${x},${24-(v-min)/Math.max(1,max-min)*20}`;previous=r;return segment;}).join(' ');node.innerHTML=`<path d="${points}" fill="none" stroke="${metric==='latency'?'#d0a7ff':'#7de6c4'}" stroke-width="2"/>`;});
+ document.dispatchEvent(new CustomEvent('fno:update'));
+}
+async function refresh(){if(state.refreshing)return;state.refreshing=true;document.body.classList.add('is-loading');$('#modeToggle').disabled=true;$('#modeToggle').setAttribute('aria-busy','true');try{const [status,overview,inventory]=await Promise.all([api('/api/status'),api('/api/v1/overview?period=24h'),api('/api/router/clients')]);state.status=status;state.overview=overview;state.clients=inventory.clients;state.api=true;renderHome();if(state.metric)await loadSheet();}catch(e){state.api=false;renderHome();toast('Recolha local indisponível: '+e.message);}finally{state.refreshing=false;document.body.classList.remove('is-loading');$('#modeToggle').disabled=false;$('#modeToggle').setAttribute('aria-busy','false');}}
+function integrationPanel(){const s=state.status,h=s?.huawei||{},probe=s?.probe,partial=Object.entries(h.sections||{}).filter(([k,v])=>k!=='router_logs'&&v!=='ok').map(([k])=>k);return keyvals([
+ ['Huawei HTTP',state.api&&h.quality==='ok'?(partial.length?'Parcial ('+partial.join(', ')+') · ':'Ativo · ')+time(h.collected_at):'Sem leitura recente'],
+ ['Sondas TCP',state.api&&probe&&fresh(probe.ts)?'Ativas · '+time(probe.ts):'Sem leitura recente'],
+ ['Histórico SQLite',state.api?'Disponível · retenção: '+retention(s.retention_days):'Servidor sem resposta'],['Logs internos Huawei','Não recolhidos'],['Consumo por aparelho','Sem fonte validada'],['Autenticação','Gerida internamente pelo coletor'],['Fila persistente',state.api&&s.recording?fmt(s.recording.pending_samples,0)+' amostras pendentes':'Sem dados'],['Exportação','CSV/JSON completos por aparelho e período']]);}
+function panelExtras(metric){const h=state.status?.huawei||{},fresh=state.api&&h.quality==='ok';if(metric==='integrations')return integrationPanel();if(!fresh&&['router','wifi'].includes(metric))return empty('Sem leitura atual. Consulta o histórico e a hora das amostras.');
+ if(metric==='router')return keyvals([['Firmware',h.firmware],['RAM',fmt(h.metrics?.memory_pct)+'%'],['Tempo ligado',duration(h.metrics?.uptime_seconds)],['Óptica RX',fmt(h.metrics?.optical_rx_dbm)+' dBm'],['Óptica TX',fmt(h.metrics?.optical_tx_dbm)+' dBm'],['Temperatura do transceiver',fmt(h.metrics?.optical_temp_c)+' °C'],['PON',h.health?.pon_connected==null?'Sem dados':h.health.pon_connected?'Ligado':'Desligado'],...Object.entries(h.interfaces||{}).map(([k,v])=>[k.toUpperCase(),`RX ${fmt(v.rx_bytes,0)} bytes · TX ${fmt(v.tx_bytes,0)} bytes · erros RX/TX ${fmt(v.rx_errors,0)}/${fmt(v.tx_errors,0)}${k.startsWith('lan')?` · ${v.link_up==null?'estado não reportado':v.link_up?'ligada '+fmt(v.speed_mbps,0)+' Mbit/s':'sem ligação'}`:''}`])]);
+ if(metric==='wifi')return keyvals(Object.entries(h.wifi||{}).map(([k,v])=>[k.toUpperCase(),`${v.enabled==null?'Estado não reportado':v.enabled?'Ativa':'Inativa'} · ${v.band||'banda desconhecida'} · canal ${fmt(v.channel,0)} · RX ${fmt(v.rx_bytes,0)} bytes · TX ${fmt(v.tx_bytes,0)} bytes · erros ${fmt(v.rx_errors,0)}/${fmt(v.tx_errors,0)}`]));
+ if(metric==='health')return integrationPanel();return '';}
+async function openSheet(metric){if(metric==='devices'){document.dispatchEvent(new CustomEvent('fno:devices'));return;}
+ state.metric=config[metric]?metric:'router';state.period='24h';state.filter='all';state.main=true;state.secondary=true;state.lastFocus=document.activeElement;
+ $('#sidebar').classList.remove('open');$('#menuToggle').setAttribute('aria-expanded','false');$('#sheetLayer').hidden=false;document.body.classList.add('sheet-open');$('#detailTitle').textContent=config[state.metric].title;$('#detailDesc').textContent=config[state.metric].desc;$('#detailSheet').focus();await loadSheet();}
+function closeSheet(){state.metric=null;state.request++;$('#sheetLayer').hidden=true;document.body.classList.remove('sheet-open');$('.shell').inert=false;state.lastFocus?.focus();}
+async function loadSheet(){const request=++state.request,metric=state.metric,period=state.period;state.bundle=null;$('#exportCsv').disabled=true;$('#detailStats').replaceChildren();$('#analysisRows').replaceChildren();$('#detailEvents').replaceChildren();$('#selectionSummary').textContent='Carregando as amostras do período selecionado…';$('#analysisText').textContent=config[metric].desc;$('#historyChart').innerHTML=empty('A carregar histórico…');try{const bundle=await api('/api/v1/overview?period='+period);if(request!==state.request||!state.metric)return;state.bundle=bundle;renderSheet();}catch(e){if(request!==state.request)return;$('#historyChart').innerHTML=empty('Não foi possível carregar o histórico.');toast(e.message);}}
+function renderSheet(){const c=config[state.metric],b=state.bundle;if(!c||!b)return;$('#detailTitle').textContent=c.title;$('#detailCrumb').textContent=c.title.toUpperCase();$('#detailDesc').textContent=c.desc;$('#detailEyebrow').textContent='INVESTIGAÇÃO / LEITURAS REAIS';$('#chartTitle').textContent=c.title;$('#chartSubtitle').textContent=`${time(b.period.from)} — ${time(b.period.to)} · médias por intervalo; extremos preservados`;
+ $$('[data-period]').forEach(el=>{const active=el.dataset.period===state.period;el.classList.toggle('active',active);el.setAttribute('aria-pressed',active);});
+ const defs=[...(c.a&&state.main?[{key:c.a,label:c.main,color:'#c3a4ff',scale:c.scale,unit:c.unit}]:[]),...(c.b&&state.secondary?[{key:c.b,label:c.secondary,color:'#69e9dc',scale:c.scale,unit:c.unit}]:[])];
+ $('#legendBox').innerHTML=[...(c.a?[['main',c.main,state.main]]:[]),...(c.b?[['secondary',c.secondary,state.secondary]]:[])].map(([key,label,on])=>`<button class="legend-button ${on?'':'off'}" data-series="${key}" aria-pressed="${on}">${esc(label)}</button>`).join('');
+ if(defs.length)chart($('#historyChart'),c.probes?b.probes:b.series,defs,b.period,$('#selectionSummary'));else $('#historyChart').innerHTML=empty('Consulta as fontes e eventos abaixo. Não existe uma série numérica para esta vista.');
+ const stats=c.probes?b.probe_stats:b.stats,a=stats[c.a]||{};
+ $('#detailStats').innerHTML=tile('Mínimo',fmt(a.min==null?null:a.min/c.scale),c.unit,'Valor real no arquivo')+tile('Média amostral',fmt(a.avg==null?null:a.avg/c.scale),c.unit,'Média aritmética das leituras')+tile('Máximo',fmt(a.max==null?null:a.max/c.scale),c.unit,'Extremo preservado')+tile('Amostras válidas',fmt(a.sample_count||0,0),'','Desta métrica no período');
+ if(!c.a)$('#detailStats').innerHTML=tile('Eventos no período',fmt(b.events.length,0),'','Registros persistidos')+tile('Avisos',fmt(b.events.filter(e=>e.severity==='warning').length,0))+tile('Críticos',fmt(b.events.filter(e=>e.severity==='critical').length,0))+tile('Cobertura da coleta',fmt(b.quality.coverage_percent),'%');
+ $('#resolutionText').textContent=`Intervalos de ${duration(b.period.resolution_seconds)} · cobertura router ${fmt(b.quality.coverage_percent)}%`;
+ $('#analysisText').textContent=c.desc;$('#analysisRows').innerHTML=keyvals([['Fonte','huawei-b7-http / TCP local conforme métrica'],['Amostras router',b.quality.sample_count],['Esperadas a cada 60s',b.quality.expected_count],['Cobertura router',fmt(b.quality.coverage_percent)+'%']])+panelExtras(state.metric);
+ const events=b.events.filter(e=>state.filter==='all'||['warning','critical'].includes(e.severity));$('#detailEvents').innerHTML=events.map(e=>`<div class="event-record"><span class="event-time">${esc(time(e.ts))}</span><div class="event-content"><strong>${esc(e.title)}</strong><span>${esc(e.detail)} · ${esc(e.source)}</span></div></div>`).join('')||empty('Sem eventos deste tipo no período.');
+ $('#selectionSummary').textContent='Usa o rato ou as setas no gráfico para consultar as leituras. Intervalos sem dados não são interpolados.';$('#sheetFootnote').textContent='Fonte e período preservados. Sem taxas WAN corrigidas, sem pontuação artificial.';$('#exportCsv').disabled=false;$('#exportCsv').textContent=state.metric==='events'?'Exportar eventos exibidos (CSV)':'Exportar CSV dos intervalos';$('#exportCsv').hidden=state.metric==='integrations';
+}
+function download(name,text,mime){const url=URL.createObjectURL(new Blob([text],{type:mime})),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),5000);}
+function exportSummary(){
+ if(!state.bundle)return;const b=state.bundle,c=config[state.metric],events=state.metric==='events';
+ const rows=events?b.events.filter(e=>state.filter==='all'||['warning','critical'].includes(e.severity)):(c.probes?b.probes:b.series);
+ const fields=events?['ts','severity','category','title','detail','source']:['timestamp','timestamp_end','sample_count',c.a,c.b,c.a&&c.a+'_min',c.a&&c.a+'_max',c.b&&c.b+'_min',c.b&&c.b+'_max','source','aggregation'].filter(Boolean);
+ const value=(p,k)=>{if(k==='source')return events?p.source:c.probes?'local_tcp_probe':'huawei-b7-http';if(k==='aggregation')return 'bucket_mean_with_min_max_envelope';if(k.endsWith('_min')||k.endsWith('_max')){const suffix=k.slice(-3);return p.values?.[k.slice(0,-4)]?.[suffix]??'';}return p[k]??'';};
+ const csv=[fields,...rows.map(p=>fields.map(k=>value(p,k)))].map(row=>row.map(v=>{const text=String(v);return '"'+(/^[=+@]/.test(text)?"'"+text:text).replaceAll('"','""')+'"';}).join(',')).join('\r\n');
+ download(`faysk-${state.metric}-${state.period}-intervalos.csv`,'\ufeff'+csv,'text/csv;charset=utf-8');
+}
+
+function trap(event,layer){if(event.key!=='Tab')return;const nodes=$$('button,a[href],input,[tabindex="0"]',layer).filter(el=>!el.disabled&&el.getClientRects().length);if(!nodes.length)return;if(event.shiftKey&&document.activeElement===nodes[0]){event.preventDefault();nodes.at(-1).focus();}else if(!event.shiftKey&&document.activeElement===nodes.at(-1)){event.preventDefault();nodes[0].focus();}}
+function init(){
+ $$('[data-detail]').forEach(el=>el.addEventListener('click',()=>openSheet(el.dataset.detail)));
+ $('#modeToggle').addEventListener('click',refresh);$('#sheetClose').addEventListener('click',closeSheet);$('#sheetBackdrop').addEventListener('click',closeSheet);
+ $('#periodButtons').addEventListener('click',e=>{const el=e.target.closest('[data-period]');if(el){state.period=el.dataset.period;loadSheet();}});
+ $('#legendBox').addEventListener('click',e=>{const el=e.target.closest('[data-series]');if(!el)return;state[el.dataset.series]=!state[el.dataset.series];if(!state.main&&!state.secondary)state.main=true;renderSheet();});
+ $('#eventsFilter').addEventListener('click',()=>{state.filter=state.filter==='all'?'warning':'all';$('#eventsFilter').textContent=state.filter==='all'?'Todos':'Avisos';renderSheet();});
+ $('#exportCsv').addEventListener('click',exportSummary);$('#infoBtn').addEventListener('click',()=>openSheet('integrations'));
+ $('#menuToggle').addEventListener('click',()=>{const on=$('#sidebar').classList.toggle('open');$('#menuToggle').setAttribute('aria-expanded',on);});
+ $('.brand').addEventListener('click',()=>$('#sidebar').classList.remove('open'));
+ $('.event-preview').addEventListener('click',e=>{if(e.target.closest('[data-event]'))openSheet('events');});
+ document.addEventListener('keydown',e=>{if(!$('#sheetLayer').hidden){if(e.key==='Escape')closeSheet();else trap(e,$('#detailSheet'));}});
+ const tick=()=>$('#clock').textContent=new Date().toLocaleTimeString('pt-PT',{hour:'2-digit',minute:'2-digit'});tick();setInterval(tick,15000);refresh();setInterval(()=>{if(!document.hidden)refresh();},60000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh();});
+}
+window.FNO={state,$,$$,esc,fmt,time,duration,retention,api,toast,tile,keyvals,empty,chart,download,trap};
+init();

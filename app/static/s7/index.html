@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0b1019">
+  <meta name="description" content="Observatório S7 — dashboard de monitoramento do homelab Galaxy S7 Edge. Telemetria real de CPU, memória, bateria, rede e armazenamento.">
+  <title>Observatório S7 — HomeLab Console</title>
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="/workspace.css?v=20261024">
+  <link rel="stylesheet" href="css/dashboard.css?v=20261023-visual2">
+  <script defer src="js/app.js?v=20261023-visual2"></script>
+  <link rel="stylesheet" href="/finish.css?v=20261024-polish">
+  <script defer src="/finish.js?v=20261024-polish"></script>
+</head>
+<body data-workspace="s7" data-theme="dark">
+  <div class="app" id="app">
+    <aside class="sidebar" id="sidebar" aria-label="Menu principal">
+      <div class="brand">
+        <div class="brand-symbol" aria-hidden="true"><span class="brand-glyph">S<span>7</span></span></div>
+        <div class="brand-copy"><strong>OBSERVATÓRIO</strong><span>HOMELAB CONSOLE</span></div>
+      </div>
+      <section class="workspace-picker" aria-label="Workspace"><div class="workspace-label">WORKSPACE <span>03</span></div><details class="project-switch"><summary aria-label="Workspace: Galaxy S7 Edge. Alterar projeto"><span class="project-icon" aria-hidden="true">S7</span><span class="project-copy"><strong>Galaxy S7 Edge</strong><small>SM-G935F · ARM64</small></span><span class="project-caret" aria-hidden="true">⌄</span></summary><nav class="project-options" aria-label="Projetos do servidor"><a href="/router/"><span class="project-icon" aria-hidden="true">R</span><span class="project-copy"><strong>Router Huawei</strong><small>Monitor da rede</small></span></a><a href="/s7/" aria-current="page"><span class="project-icon" aria-hidden="true">S7</span><span class="project-copy"><strong>Galaxy S7 Edge</strong><small>SM-G935F · ARM64</small></span><span class="project-check" aria-hidden="true">✓</span></a><a href="/valt/"><span class="project-icon" aria-hidden="true">V</span><span class="project-copy"><strong>Docs Vault</strong><small>Arquivo documental</small></span></a></nav></details></section>
+      <div class="nav-caption">MONITORAMENTO</div>
+            <nav class="nav-list" id="main-nav" aria-label="Áreas do monitoramento"></nav>
+      <div class="sidebar-bottom">
+        <div class="sidebar-health">
+          <div class="sidebar-health-title"><span class="pulsing-dot"></span><strong id="sidebar-status">Aguardando API</strong></div>
+          <p id="sidebar-status-note">Nenhuma medição recebida ainda.</p>
+        </div>
+        <div class="sidebar-footer"><span>OBSERVATÓRIO S7 <b>v2.0</b></span><span>LOCAL-FIRST</span></div>
+      </div>
+    </aside>
+    <div class="sidebar-scrim" id="sidebar-scrim"></div>
+    <div class="shell">
+      <header class="topbar">
+        <div class="topbar-leading">
+          <button class="icon-button mobile-only" type="button" id="menu-toggle" aria-label="Abrir menu" aria-controls="sidebar"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+          <div class="breadcrumbs"><span>Workspace</span><span class="slash">/</span><strong id="breadcrumb-current">Visão geral</strong></div>
+        </div>
+        <div class="topbar-actions">
+          <div class="live-time" id="clock-label">--:--:--</div>
+          <div class="topbar-divider"></div>
+          <span class="mode-chip demo" id="mode-chip"><span></span> AGUARDANDO</span>
+          <button class="icon-button" type="button" id="theme-toggle" title="Alternar tema" aria-label="Alternar tema"></button>
+          <button class="avatar" type="button" id="avatar-button" title="Configurações do painel">S7</button>
+        </div>
+      </header>
+      <main class="main" id="main-content" tabindex="-1"></main>
+      <footer class="page-footer"><span>OBSERVATÓRIO S7 <span class="footer-divider">/</span> Monitoramento local com privacidade</span><span id="footer-update">Aguardando dados</span></footer>
+    </div>
+    <div id="toast-region" class="toast-region" aria-live="polite"></div>
+    <div id="tooltip" class="chart-tooltip" hidden></div>
+  </div>
+  <noscript><div class="noscript">Para usar o dashboard, ativa o JavaScript no navegador. Nenhuma biblioteca externa é necessária.</div></noscript>
+</body>
+</html>

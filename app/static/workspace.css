@@ -1,0 +1,25 @@
+/* Shared workspace selector: geometry and behavior are identical across projects. */
+[data-workspace="router"]{--ws-accent:var(--mint,#7ce5c3);--ws-surface:var(--surface,#121c28);--ws-border:var(--stroke,#263545);--ws-muted:var(--sub,#a4b5c8)}
+[data-workspace="s7"],[data-workspace="valt"]{--ws-accent:var(--accent);--ws-surface:var(--surface-solid,var(--surface));--ws-border:var(--border);--ws-muted:var(--secondary,var(--muted))}
+.workspace-picker{margin:0 14px 24px;min-width:0;color:var(--text);font:12px/1.5 'Segoe UI',system-ui,sans-serif}
+[data-workspace="s7"] .workspace-picker,[data-workspace="valt"] .workspace-picker{margin-inline:0}
+.workspace-picker *{box-sizing:border-box}
+.workspace-label{display:flex;justify-content:space-between;align-items:center;margin:0 8px 10px;color:var(--ws-muted);font-size:9px;line-height:14px;font-weight:800;letter-spacing:1.8px}
+.workspace-label span{color:var(--ws-accent);font-variant-numeric:tabular-nums}
+.workspace-picker details.project-switch{position:relative;margin:0;min-width:0;color:inherit;font:inherit}
+.workspace-picker .project-switch summary{display:flex;align-items:center;gap:10px;padding:11px 10px;min-height:64px;background:var(--ws-surface);border:1px solid var(--ws-border);border-radius:12px;cursor:pointer;list-style:none;transition:border-color .18s,background .18s}
+.workspace-picker summary::-webkit-details-marker{display:none}
+.workspace-picker summary:hover,.workspace-picker details[open] summary{border-color:var(--ws-accent)}
+.workspace-picker summary:focus-visible,.workspace-picker .project-options a:focus-visible{outline:2px solid var(--ws-accent);outline-offset:3px}
+.workspace-picker .project-icon{display:grid;place-items:center;width:34px;height:36px;flex:0 0 34px;border:1px solid var(--ws-border);border-radius:9px;background:var(--ws-surface);color:var(--ws-accent);font-size:11px;font-weight:800}
+.workspace-picker .project-copy{display:block;min-width:0;flex:1}
+.workspace-picker .project-copy strong{display:block;color:var(--text);font-size:12px;line-height:18px;font-weight:700;white-space:nowrap}
+.workspace-picker .project-copy small{display:block;color:var(--ws-muted);font-size:10px;line-height:15px;white-space:nowrap}
+.workspace-picker .project-caret{margin-left:auto;color:var(--ws-muted);transition:transform .18s}
+.workspace-picker details[open] .project-caret{transform:rotate(180deg)}
+.workspace-picker .project-options{position:absolute;top:calc(100% + 7px);left:0;right:0;z-index:90;padding:5px;background:var(--ws-surface);border:1px solid var(--ws-border);border-radius:12px;box-shadow:0 14px 30px #0003}
+.workspace-picker .project-options a{display:flex;align-items:center;gap:9px;min-height:58px;padding:9px 6px;border:1px solid transparent;border-radius:8px;color:var(--text);text-decoration:none}
+.workspace-picker .project-options a:hover,.workspace-picker .project-options a[aria-current="page"]{border-color:var(--ws-accent);background:var(--bg)}
+.workspace-picker .project-check{color:var(--ws-accent);font-size:13px}
+@media(min-width:671px) and (max-width:1160px){[data-workspace="router"] .workspace-picker{margin-inline:8px}[data-workspace="router"] .workspace-label{font-size:0;justify-content:center}[data-workspace="router"] .workspace-label span{font-size:9px}[data-workspace="router"] .project-switch summary{justify-content:center;padding-inline:6px}[data-workspace="router"] summary .project-copy,[data-workspace="router"] .project-caret{display:none}[data-workspace="router"] .project-options{width:225px}}
+@media(prefers-reduced-motion:reduce){.workspace-picker *{transition:none!important}}

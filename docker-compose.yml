@@ -1,0 +1,22 @@
+services:
+  observatory:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8765:8765"
+    environment:
+      FNO_ROUTER_IP: ${FNO_ROUTER_IP:-192.168.1.1}
+      FNO_INTERVAL: ${FNO_INTERVAL:-60}
+      FNO_RETENTION_DAYS: ${FNO_RETENTION_DAYS:-0}
+      FNO_INGEST_TOKEN: ${FNO_INGEST_TOKEN:-}
+    volumes:
+      - observatory-data:/service/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+volumes:
+  observatory-data:

@@ -1,0 +1,30 @@
+/* Shared finish: predictable focus, restrained motion, readable data. */
+:root{--finish-ease:cubic-bezier(.22,.68,.2,1)}
+html{scroll-padding-top:88px;scrollbar-gutter:stable}
+body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+button,a,summary,input,select,textarea{-webkit-tap-highlight-color:transparent}
+button,a,summary{touch-action:manipulation}
+button:disabled{cursor:wait;opacity:.6}
+button:focus-visible,a:focus-visible,summary:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--ws-accent);outline-offset:3px}
+.project-options a{transition:background .16s,border-color .16s}
+.project-options a:active{transform:translateY(1px)}
+.project-switch[open] .project-options{animation:workspaceReveal .16s var(--finish-ease) both;transform-origin:top}
+@keyframes workspaceReveal{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.kpi-value,.metric-value,.d-stat>strong,.metric-card>strong,.timeline-days,.telemetry-mini strong,.stat-tile strong,.viewer-meta{font-variant-numeric:tabular-nums}
+.telemetry-field strong,.details-row strong,.d-keyval strong,.fact-value{overflow-wrap:anywhere;min-width:0}
+[data-workspace="router"] .sheet-scroll,[data-workspace="router"] .device-drawer-scroll,[data-workspace="valt"] .viewer-body{overscroll-behavior:contain}
+[data-workspace="router"] .metric-card,[data-workspace="s7"] .kpi-card,[data-workspace="valt"] .doc-card{transition:border-color .18s,box-shadow .18s}
+@media(hover:hover){[data-workspace="s7"] .kpi-card:hover{border-color:var(--accent)}[data-workspace="valt"] .doc-card:hover{border-color:var(--accent)}}
+[data-workspace="valt"] .page-banner h1{line-height:1.15}
+[data-workspace="valt"] .library-toolbar{gap:10px}
+[data-workspace="valt"] .empty-state{line-height:1.6}
+[data-workspace="valt"] .viewer-header{flex-wrap:wrap}
+[data-workspace="valt"] .viewer-note,[data-workspace="valt"] #viewerNote{font-size:12px;line-height:1.6}
+[data-workspace="valt"] .privacy-on .fact-value{user-select:none}
+[data-workspace="s7"] .chart-wrap,[data-workspace="router"] .interactive-chart{min-width:0}
+[data-workspace="s7"] .freshness-bar{font-variant-numeric:tabular-nums}
+@media(max-width:670px){button:not(.project-switch button),summary{min-height:36px}.workspace-picker summary{min-height:64px}[data-workspace="valt"] .viewer{padding:8px}[data-workspace="valt"] .viewer-panel{width:100%;height:calc(100dvh - 16px);max-height:100%;border-radius:16px}[data-workspace="valt"] .viewer-heading{flex:1;min-width:0}[data-workspace="valt"] .viewer-actions{flex-wrap:wrap;gap:6px}[data-workspace="valt"] .viewer-side{max-height:35vh;overflow:auto}[data-workspace="valt"] .viewer-header{gap:10px}[data-workspace="s7"] .freshness-bar{flex-wrap:wrap;gap:8px}[data-workspace="router"] .telemetry-field{grid-template-columns:minmax(0,1fr);gap:5px}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+body.finish-hidden .device-orbit *,body.finish-hidden .pulsing-dot,body.finish-hidden .freshness-dot,body.finish-hidden .offline-dot{animation-play-state:paused!important}
+
+body[data-workspace="s7"][data-theme="light"]{--muted:#627386;--secondary:#4e6275;--border-soft:#d5dfe8}
