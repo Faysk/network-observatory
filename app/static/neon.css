@@ -15,3 +15,12 @@ html{scroll-padding-top:85px;scrollbar-color:#6a4a80 #100d1a}body{background:rad
 /* Shared inspector for home, metric sheets and individual device charts. */
 .interactive-chart{position:relative}.inspect-area{cursor:crosshair;touch-action:pan-y}.chart-inspector{position:absolute;z-index:8;pointer-events:none;width:246px;max-width:calc(100% - 16px);padding:14px 15px;border:1px solid #936b9e;border-radius:12px;background:linear-gradient(135deg,#35233ff5,#182331f7);box-shadow:0 12px 35px #0007;color:#eee5fa;backdrop-filter:blur(12px);font-size:12px;text-align:left;line-height:1.5}.inspector-time{display:block;font-size:11px;color:#ffe0f4;margin-bottom:9px}.inspector-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:7px 0}.inspector-row>span{display:flex;align-items:center;gap:7px;color:#c6b9d7}.inspector-row i{width:7px;height:7px;border-radius:50%;background:var(--series-color);flex-shrink:0}.inspector-row b{font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;font-size:12px}.inspector-row small{font-size:10px;color:#c9bad9}.inspector-range{font-size:10px;color:#bca8cd;margin:-2px 0 8px 14px}.inspector-meta{display:block;border-top:1px solid #78518166;padding-top:8px;margin-top:9px;font-size:10px;color:#c4b0d1}.inspect-line{pointer-events:none}
 @media(max-width:670px){.chart-inspector{width:205px;padding:10px;font-size:11px}.inspector-row b{font-size:11px}.inspector-meta{font-size:9px}}
+
+/* Fetch status is independent for each dashboard section. */
+.resource-state{display:block;min-height:20px;margin:8px 0;color:var(--secondary,var(--text));font-size:11px;line-height:1.55}
+.resource-state:empty{min-height:0;margin:0}
+.resource-state[data-phase="error"],.resource-state[data-phase="stale"]{color:var(--orange,#d99560)}
+.resource-state button,[data-sheet-retry]{background:transparent;border:1px solid currentColor;border-radius:7px;padding:5px 8px;min-height:32px;cursor:pointer;color:inherit}
+.resource-state button:focus-visible,[data-sheet-retry]:focus-visible{outline:2px solid var(--accent,#69e9dc);outline-offset:2px}
+#historyChart[aria-busy="true"]{opacity:.86}
+@media(prefers-reduced-motion:reduce){#historyChart,.resource-state{animation:none!important;transition:none!important}}
