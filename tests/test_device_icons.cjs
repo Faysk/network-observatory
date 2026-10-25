@@ -14,6 +14,6 @@ for(const [name,svg] of Object.entries(paths)){
  assert.ok(css.includes('cat-'+name)||name==='unknown','category has no CSS '+name);
 }
 assert.match(script,/aria-hidden=\\?"true\\?"/,'decorative icons should be hidden to screen readers');
-assert.match(script,/categoryPaths\[category\(c\)\]/,'unknown class must use safe allowlisted fallback');
+assert.match(script,/categoryPaths\[iconCategory\]/,'manual icon must use allowlisted SVG path');
 assert.match(script,/identity-symbol cat-/,'dossier and inventory must share category');
 console.log('Offline category icon catalog passed: '+expected.length+' SVG types, fallback and a11y.');
