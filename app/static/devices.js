@@ -9,7 +9,7 @@ const CATEGORY_LABELS={smartphone:'Smartphone provável',tablet:'Tablet prováve
 const PLATFORM_LABELS={android:'Android',ios:'iOS/iPadOS',windows:'Windows',linux:'Linux',macos:'macOS'};
 const CONFIDENCE_LABELS={high:'Alta',medium:'Média',low:'Baixa',unknown:'Desconhecida'};
 function categoryOf(c){const category=c?.classification?.category;return DEVICE_CATEGORIES.has(category)?category:'unknown';}
-function iconMarkup(c){const category=categoryOf(c);return '<svg class="device-category-icon" aria-hidden="true" focusable="false"><use href="/device-icons.svg#'+category+'"></use></svg>';}
+function iconMarkup(c){const category=categoryOf(c);return '<svg class="device-category-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/device-icons.svg#'+category+'"></use></svg>';}
 function categoryLabel(c){return CATEGORY_LABELS[categoryOf(c)];}
 function identitySubtitle(c){
  const label=categoryLabel(c);
