@@ -37,12 +37,20 @@ Veja [manual de instalação, limites e QA](docs/DEVICE_IDENTITY_OUI.md). Há te
 
 [Taxonomia, precedências, evidências e limites](docs/DEVICE_CLASSIFIER.md). A experiência visual está reservada para as issues #9 e #10.
 
+## Ícones locais por categoria (issue #9)
+
+O inventário da home, explorador completo e topo do dossiê usam os mesmos ícones do sprite **local** `app/static/device-icons.svg` para 13 categorias, com fallback `unknown`. Ícones geométricos originais, sem dependências/brands/CDN ou fontes externas. A interface mostra categoria **provável**, plataforma quando sustentada e dados técnicos com proveniência no dossiê. Estado e significado não dependem só da cor. Mantida compatibilidade com categorias desconhecidas e navegadores de viewport estreita.
+
+Testes em `tests/test_device_icons.py` verificam SVG, cobertura do catálogo, fallback, resposta HTTP e acessibilidade básica. A reorganização completa, filtros/paginação/polling estável pertencem à issue #10.
+
 ## Validação
 
 ```sh
 python -m unittest discover -s tests -v
 python -m unittest tests.test_device_identity -v
 python -m unittest tests.test_device_classifier -v
+python -m unittest tests.test_device_icons -v
+node --check app/static/devices.js
 node tests/test_s7_ui.cjs
 node --check app/static/app.js
 ```
