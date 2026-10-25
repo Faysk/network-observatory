@@ -45,6 +45,23 @@ class MacIdentityTests(unittest.TestCase):
         self.assertIsNone(ident.enrich_mac('00:11:22:33:44:55',dataset=(None,{}))['oui_vendor'])
         self.assertEqual(ident.enrich_mac('01:00:5e:00:00:01')['mac_type'],'multicast')
         self.assertIsNone(ident.enrich_mac(None)['oui_vendor'])
+    def test_offline_import_and_1000_synthetic_addresses(self):
+        import tempfile
+        import json
+        import time
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as root:
+            local=Path(root)/'test-ieee.csv'
+            local.write_text('Assignment,Organization Name\\n001122,Fixture Registrant\\n',encoding='utf-8')
+            items=ident.load_ieee_csv(local,24)
+            self.assertEqual(items,[{'prefix':'001122','prefix_bits':24,'registrant':'Fixture Registrant'}])
+        table=('fixture', {(24,'001122'):'Fixture Registrant'})
+        start=time.perf_counter()
+        results=[ident.enrich_mac('00:11:22:%02x:%02x:%02x'%(i//65536,(i//256)%256,i%256),dataset=table) for i in range(1000)]
+        elapsed=(time.perf_counter()-start)*1000
+        self.assertEqual(len(results),1000)
+        self.assertTrue(all(x['oui_vendor']=='Fixture Registrant' for x in results))
+        print('Offline MAC lookup for 1000 fixture addresses:',round(elapsed,3),'ms')
     def test_memory_bounded(self):
         self.assertEqual(ident._dataset.cache_info().maxsize,1)
 
