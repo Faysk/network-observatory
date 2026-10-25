@@ -35,10 +35,13 @@ def mac_type(value):
 
 @lru_cache(maxsize=1)
 def _dataset():
-    # Explicitly packaged tiny bootstrap dataset; optional local IEEE dataset can
-    # be updated offline by the operator. Never auto-fetch or infer vendor when absent.
+    # Explicitly packaged empty bootstrap; operator-maintained local registry.
+    # Never fetch MAC assignments from any remote service during a request.
+    import os
+    configured=os.environ.get('FNO_OUI_FILE')
+    source=Path(configured).expanduser() if configured else DATASET
     try:
-        raw=json.loads(DATASET.read_text(encoding='utf-8'))
+        raw=json.loads(source.read_text(encoding='utf-8'))
         entries={}
         for item in raw.get('assignments', []):
             bits=item.get('prefix_bits')
