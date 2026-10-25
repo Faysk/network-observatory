@@ -23,10 +23,19 @@ O adaptador opcional `python -m app.adapters.huawei_b7 --help` foi desenvolvido 
 - O Vault é separado: https://github.com/Faysk/docs-vault . Para a integração `/valt/`, disponibilize seu frontend em `sites/valt/` local, ignorado pelo Git; mantenha dados reais privados.
 - O painel S7 independente: https://github.com/Faysk/s7-edge-observatory .
 
+## Identificação MAC / OUI (issue #7)
+
+O inventário em `GET /api/router/clients` agora expõe um campo de **evidências `identity`** separado dos dados reportados pelo Huawei: endereço normalizado, tipo de MAC (global/local/multicast/etc.), fornecedor do **bloco de endereço** IEEE quando disponível, versão/fonte. O MAC local **não é prova** de randomização; OUI global **não identifica modelo nem aparelho físico**. Nenhuma amostra histórica ou exportação é modificada.
+
+**Importante:** a base IEEE não vem incluída no checkout. Para resolver fornecedores offline, o operador deve importar os CSVs oficiais **fora do dispositivo**, gerar `oui-assignments.tsv` e colocar no **mesmo diretório de `FNO_DB`**, no microSD para S7. Sem arquivo: `oui_vendor=null`, sem adivinhação, e sem consulta de MAC a serviço externo.
+
+Veja [manual de instalação, limites e QA](docs/DEVICE_IDENTITY_OUI.md). Há testes sintéticos em `tests/test_device_identity.py`.
+
 ## Validação
 
 ```sh
 python -m unittest discover -s tests -v
+python -m unittest tests.test_device_identity -v
 node tests/test_s7_ui.cjs
 node --check app/static/app.js
 ```
