@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import threading
 import unittest
@@ -9,6 +10,8 @@ from pathlib import Path
 from unittest.mock import patch
 from app import core
 from app.server import Handler
+
+HTTP_TIMEOUT=float(os.environ.get('FNO_TEST_HTTP_TIMEOUT','3'))
 
 class HttpTests(unittest.TestCase):
     @classmethod
@@ -36,7 +39,7 @@ class HttpTests(unittest.TestCase):
         headers={'Content-Type':'application/json'}
         if token is not None:headers['X-API-Key']=token
         req=urllib.request.Request(self.url+path,data=encoded,headers=headers)
-        with urllib.request.urlopen(req,timeout=3) as res:return res.status,res.read(),dict(res.headers)
+        with urllib.request.urlopen(req,timeout=HTTP_TIMEOUT) as res:return res.status,res.read(),dict(res.headers)
 
     def test_host_namespace_partial_and_static_isolation(self):
         from app.host_telemetry import HostMonitor, empty_snapshot
@@ -148,9 +151,9 @@ class HttpTests(unittest.TestCase):
             with self.assertRaises(urllib.error.HTTPError) as error:self.request('/api/ingest/huawei',p,token)
             self.assertEqual(error.exception.code,400)
             req=urllib.request.Request(self.url+'/api/ingest/huawei',data=json.dumps(p).encode(),headers={'Content-Type':'application/json','X-API-Key':token,'X-FNO-Backfill':'1'})
-            with urllib.request.urlopen(req,timeout=3) as response:self.assertEqual(response.status,201)
+            with urllib.request.urlopen(req,timeout=HTTP_TIMEOUT) as response:self.assertEqual(response.status,201)
             req=urllib.request.Request(self.url+'/api/ingest/huawei',data=json.dumps(p).encode(),headers={'Content-Type':'application/json','X-FNO-Backfill':'1'})
-            with self.assertRaises(urllib.error.HTTPError) as error:urllib.request.urlopen(req,timeout=3)
+            with self.assertRaises(urllib.error.HTTPError) as error:urllib.request.urlopen(req,timeout=HTTP_TIMEOUT)
             self.assertEqual(error.exception.code,401)
 
     def test_private_client_endpoint(self):

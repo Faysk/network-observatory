@@ -162,6 +162,17 @@ class SafeStaticHttp(unittest.TestCase):
         self.assertEqual(self.get('/router/app.js',{'Accept-Encoding':'gzip;q=0'})[2].get('Content-Encoding'),None)
         self.assertEqual(self.get('/router/app.js',method='HEAD')[1],b'')
         self.assertEqual(self.get('/router/app.js',{'If-Modified-Since':headers['Last-Modified']})[0],304)
+    def test_modified_since_rounds_filesystem_subseconds_to_http_seconds(self):
+        import os
+        with tempfile.TemporaryDirectory() as folder:
+            asset=Path(folder)/'app.js';asset.write_text('const synthetic = 1;')
+            os.utime(asset,ns=(1700000000999999999,1700000000999999999))
+            with patch('app.server.STATIC',Path(folder)):
+                status,body,headers=self.get('/app.js')
+                self.assertEqual(status,200)
+                self.assertEqual(self.get('/app.js',{'If-Modified-Since':headers['Last-Modified']})[0],304)
+                self.assertEqual(self.get('/app.js',{'If-Modified-Since':'Tue, 14 Nov 2023 22:13:19 GMT'})[0],200)
+
     def test_content_change_changes_etag_and_other_formats_do_not_cache(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder)

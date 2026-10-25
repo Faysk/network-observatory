@@ -70,7 +70,8 @@ class Handler(BaseHTTPRequestHandler):
         if match is None and self.headers.get('If-Modified-Since'):
             try:
                 parsed=parsedate_to_datetime(self.headers['If-Modified-Since'])
-                valid=parsed.tzinfo is not None and stat.st_mtime<=parsed.timestamp()+0.999
+                # HTTP-date has whole-second precision, including mtimes ending .9999.
+                valid=parsed.tzinfo is not None and int(stat.st_mtime)<=int(parsed.timestamp())
             except (ValueError,TypeError,OverflowError):pass
         body=packed if use_gzip else raw
         self.send_response(304 if valid else 200)
