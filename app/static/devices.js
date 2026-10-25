@@ -112,9 +112,34 @@ function renderExplorerResults(){
    button.setAttribute('aria-pressed',String(active));
  });
 }
-async function openDevice(id=null){state.lastFocus=document.activeElement;state.id=id;state.period='24h';state.tab='overview';state.bundle=null;$('#deviceLayer').hidden=false;document.body.classList.add('device-open');$('#sidebar').classList.remove('open');$('#menuToggle').setAttribute('aria-expanded','false');$('#deviceDrawerScroll').scrollTop=0;$('#deviceDrawer').focus();if(id===null){explorer();return;}await load();}
-function close(){state.request++;$('#deviceLayer').hidden=true;document.body.classList.remove('device-open');$('#sheetLayer').inert=false;$('.shell').inert=!$('#sheetLayer').hidden;state.lastFocus?.focus();}
+async function openDevice(id=null){
+ const entering=$('#deviceLayer').hidden;
+ if(entering)state.lastFocus=document.activeElement;
+ if(!entering&&state.id===null&&id!==null)state.explorerScrollTop=$('#deviceDrawerScroll').scrollTop;
+ state.id=id;state.period='24h';state.tab='overview';state.bundle=null;
+ $('#deviceLayer').hidden=false;document.body.classList.add('device-open');
+ $('#sidebar').classList.remove('open');$('#menuToggle').setAttribute('aria-expanded','false');
+ if(entering)$('#deviceDrawerScroll').scrollTop=0;
+ $('#deviceDrawer').focus();
+ if(id===null){explorer();return;}
+ $('#deviceDrawerScroll').scrollTop=0;
+ await load();
+}
+function close(){
+ state.request++;state.id=null;
+ $('#deviceLayer').hidden=true;document.body.classList.remove('device-open');
+ $('#sheetLayer').inert=false;$('.shell').inert=!$('#sheetLayer').hidden;
+ const source=state.lastFocus?.isConnected?state.lastFocus:$('#deviceOpenAll');
+ source?.focus({preventScroll:true});
+}
 async function load(){const id=state.id,period=state.period,request=++state.request;$('#deviceDetailContent').innerHTML=empty('A carregar observações…');try{const data=await api('/api/v1/devices/'+id+'?period='+period);if(request!==state.request)return;state.bundle=data;render();}catch(error){if(request===state.request){$('#deviceDetailContent').innerHTML=empty('Não foi possível carregar as observações: '+error.message);state.bundle=null;}}}
+function backToExplorer(){
+ state.request++;state.id=null;state.bundle=null;
+ explorer();
+ $('#deviceDrawerScroll').scrollTop=state.explorerScrollTop;
+ const search=$('#deviceExplorerSearch');
+ if(search)search.focus({preventScroll:true});
+}
 function panel(title,body,sub=''){return `<section class="d-panel"><div class="d-panel-head"><div><h3 class="d-panel-title">${esc(title)}</h3><p class="d-panel-sub">${esc(sub)}</p></div></div>${body}</section>`;}
 function historyChart(id,title,subtitle=''){return panel(title,`<div class="d-chart" id="${id}"></div><p class="d-chart-foot" id="${id}-selection">Usa o rato ou as setas no gráfico para inspecionar amostras.</p>`,subtitle);}
 function sessions(b){return panel('Períodos de presença observada',`<div class="d-sessions">${b.sessions.slice(-20).reverse().map(s=>`<div class="d-session-row"><div><strong>${esc(time(s.started_at))} — ${esc(time(s.last_observed_at))}</strong><small>Origem: ${esc(s.source)} · ${s.end_reason==='sample_gap'?'Interrompido por lacuna':'Estado reportado / limite da janela'} · estimado por amostras</small></div><span class="d-session-duration">≈ ${esc(duration(s.observed_duration_seconds))}</span></div>`).join('')||empty('Sem amostras online neste período.')}</div><p class="d-subtitle">${b.session_count} segmentos observados; são exibidos os últimos 20. Não são horários exatos de associação. Lacunas dividem segmentos e não comprovam reconexão.</p>`);}
@@ -129,6 +154,7 @@ function render(){const b=state.bundle;if(!b)return;const c=devices().find(x=>x.
  if(state.tab==='connection')root.innerHTML=`<div class="d-cards">${tile('RSSI mínimo',fmt(b.stats.rssi_dbm.min),'dBm','Valor AP reportado')}${tile('RSSI máximo',fmt(b.stats.rssi_dbm.max),'dBm','Extremo do arquivo')}${tile('SNR médio',fmt(b.stats.snr_db.avg),'dB','Valor reportado pelo fabricante')}${tile('RTT LAN','Sem dados','ms','Não há sonda configurada para este cliente')}</div>${historyChart('signalChart','Sinal reportado pelo AP','Ethernet não tem RSSI. Intervalos sem medição ficam vazios.')}${historyChart('phyChart','Taxas PHY RX/TX','Taxas de ligação, em Mbit/s; perspetiva do router')}${sessions(b)}`;
  if(state.tab==='events')root.innerHTML=panel('Eventos persistidos deste aparelho',b.events.map(e=>`<div class="d-event"><time>${esc(time(e.ts))}</time><span class="dot ${e.severity==='warning'?'warning':''}"></span><div><strong>${esc(e.title)}</strong><p>${esc(e.detail)}</p></div><code>${esc(e.source)}</code></div>`).join('')||empty('Sem eventos deste aparelho no período. Não são fabricados eventos para amostras ausentes.'));
  if(state.tab==='identity')root.innerHTML=panel('Identidade e fontes',keyvals([['MAC reportado',d.mac],['Nomes / aliases',d.names?.join(' · ')||'Não reportados'],['Endereços reportados',d.ips?.join(' · ')||'Não reportados'],['Portas / interfaces',d.ports?.join(' · ')||'Não reportadas'],['Tipos reportados',d.device_types?.join(' · ')||'Não reportados'],['Primeira observação no arquivo',time(d.first_seen)],['Última observação',time(d.collected_at)],['Categoria sugerida',categoryLabel(c)],['Plataforma sugerida',PLATFORM_LABELS[c?.classification?.platform_family]||'Desconhecida'],['Confiança qualitativa',CONFIDENCE_LABELS[c?.classification?.confidence]||'Desconhecida'],['Evidências / regras',(c?.classification?.evidence||[]).map(e=>e.rule).join(' · ')||'Não existem indícios suficientes'],['Tipo do MAC',c?.identity?.mac_type||'unknown'],['Fabricante do bloco MAC (IEEE)',c?.identity?.oui_vendor||'Não identificado / não disponível'],['Semântica do fabricante','Assignee de bloco da interface; não prova marca nem modelo do aparelho'],['Fonte',b.source],['Confiança','Identidade reportada, sem associação entre MACs aleatórios'],['Cobertura da janela',fmt(b.quality.coverage_percent)+'%'],['Amostras esperadas',b.quality.expected_count],['Lacunas observadas',b.quality.sample_gaps],['Taxas individuais / RTT','Sem dados'],['Retenção',retention(app.status?.retention_days)]]))+panel('Histórico de identidade',`<div id="identityHistory">${(b.identity_history||[]).map(x=>keyvals([['Observação',time(x.collected_at)],['Nomes',x.names.join(' · ')],['IPs',x.ips.join(' · ')],['Interfaces',x.ports.join(' · ')]] )).join('')||empty('Sem alterações de identidade na janela.')}</div>`);
+ root.insertAdjacentHTML('afterbegin','<button class="device-back-button" type="button" data-inv-back>← Voltar ao inventário</button>');
  const draw=(id,defs)=>{const node=$('#'+id);if(node)chart(node,b.series,defs,b.period,$('#'+id+'-selection'));};
  draw('presenceChart',[{key:'presence',label:'Presença reportada',color:'#69e9dc',unit:'%'}]);
  draw('signalChart',[{key:'rssi_dbm',label:'RSSI AP',color:'#69e9dc',unit:'dBm'}]);
