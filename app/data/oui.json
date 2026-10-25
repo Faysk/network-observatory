@@ -1,0 +1,6 @@
+{
+  "version": "bootstrap-empty-2026-10",
+  "source": "IEEE Registration Authority (operator-supplied CSV import)",
+  "license_note": "No upstream IEEE allocation entries are bundled. Provide and license your own downloaded registry.",
+  "assignments": []
+}
