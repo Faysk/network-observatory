@@ -23,7 +23,7 @@ O adaptador opcional `python -m app.adapters.huawei_b7 --help` foi desenvolvido 
 - O Vault é separado: https://github.com/Faysk/docs-vault . Para a integração `/valt/`, disponibilize seu frontend em `sites/valt/` local, ignorado pelo Git; mantenha dados reais privados.
 - O painel S7 independente: https://github.com/Faysk/s7-edge-observatory .
 
-## Validação
+## Identificação MAC/OUI (opcional)\n\nO inventário pode acrescentar `identity` com tipo MAC e fabricante OUI registrado, quando conhecido. Não garante aparelho, OS ou dono. Sem arquivo local OUI, fabricante permanece desconhecido. Veja [instruções offline e privacidade](docs/MAC_OUI.md).\n\n## Validação
 
 ```sh
 python -m unittest discover -s tests -v
