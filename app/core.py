@@ -93,6 +93,15 @@ def init_db():
           id INTEGER PRIMARY KEY, ts TEXT NOT NULL, severity TEXT NOT NULL,
           category TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL, source TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
+        CREATE TABLE IF NOT EXISTS device_presentation_overrides (
+          mac TEXT PRIMARY KEY,
+          nickname TEXT,
+          category TEXT,
+          icon TEXT,
+          note TEXT,
+          revision INTEGER NOT NULL DEFAULT 1,
+          updated_at TEXT NOT NULL
+        );
         """)
 
 
@@ -296,6 +305,8 @@ def get_router_clients(mac=None, limit=120):
             item['identity']=enrich_mac(item.get('mac'))
             from .device_classifier import classify_client
             item['classification']=classify_client(item)
+            from .device_preferences import read_presentation
+            item['presentation']=read_presentation(db,item.get('mac'))
             result.append(item)
         return {'source':'huawei-b7-http','clients':result,'retention_days':RETENTION_DAYS,'retention_unlimited':RETENTION_DAYS==0}
 
