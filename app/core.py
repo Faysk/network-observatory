@@ -294,6 +294,8 @@ def get_router_clients(mac=None, limit=120):
                         quality='ok' if -5<=age<=180 else 'stale')
             from .device_identity import enrich_mac
             item['identity']=enrich_mac(item.get('mac'))
+            from .device_classifier import classify_client
+            item['classification']=classify_client(item)
             result.append(item)
         return {'source':'huawei-b7-http','clients':result,'retention_days':RETENTION_DAYS,'retention_unlimited':RETENTION_DAYS==0}
 
