@@ -9,3 +9,17 @@
 
 .d-mini-stats.four{grid-template-columns:repeat(4,minmax(0,1fr))}
 @media(max-width:670px){.d-mini-stats.four{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Device category iconography: fixed offline stroke SVGs, not brand logos. */
+.category-icon{width:23px;height:23px;display:block;flex-shrink:0}
+.identity-symbol .category-icon{width:31px;height:31px}
+.device-avatar[class*="cat-"],.identity-symbol[class*="cat-"]{font-size:inherit}
+.cat-smartphone,.cat-tablet{color:#d2b3f1;background:#342742;border-color:#5c3f70}
+.cat-laptop,.cat-desktop{color:#9cdce7;background:#183b43;border-color:#386572}
+.cat-game_console{color:#b9ecd2;background:#203a36;border-color:#3f7063}
+.cat-smart_tv,.cat-streaming_box{color:#b0cafa;background:#28374c;border-color:#445e84}
+.cat-printer,.cat-camera,.cat-robot_vacuum,.cat-iot{color:#edc7a4;background:#403023;border-color:#655039}
+.cat-network_device{color:#b1dae2;background:#203d47;border-color:#3e6570}
+.cat-unknown{color:#adb4c2;background:#30303c;border-color:#4f5163}
+.device-list-row:focus-visible{outline:2px solid #9cead9;outline-offset:2px}
+@media(prefers-reduced-motion:reduce){.device-list-row{transition:none!important;transform:none!important}}
