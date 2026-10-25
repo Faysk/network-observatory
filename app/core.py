@@ -292,6 +292,8 @@ def get_router_clients(mac=None, limit=120):
             age=(datetime.now(timezone.utc)-datetime.fromisoformat(row['ts'])).total_seconds()
             item.update(first_seen=row['first_seen'],last_seen=row['ts'],observations=row['observations'],
                         quality='ok' if -5<=age<=180 else 'stale')
+            from .device_identity import enrich_mac
+            item['identity']=enrich_mac(item.get('mac'))
             result.append(item)
         return {'source':'huawei-b7-http','clients':result,'retention_days':RETENTION_DAYS,'retention_unlimited':RETENTION_DAYS==0}
 
