@@ -91,6 +91,32 @@ class BackendOptimizations(unittest.TestCase):
             self.assertEqual(len(calls),1)
             self.assertEqual([v['quality']['sample_count'] for v in result],[127]*4)
 
+    def test_inventory_latest_timestamp_wins_over_backfilled_higher_id(self):
+        mac='02:00:00:00:00:01';now=datetime.now(timezone.utc)
+        observations=[(now,'Latest fixture'),(now-timedelta(days=1),'Backfilled fixture'),(now,'Latest tie fixture')]
+        with core.connect() as db:
+            for stamp,name in observations:
+                payload={'mac':mac,'names':[name],'ports':['wifi:fixture'],'reported_status':'Online'}
+                db.execute('INSERT INTO router_client_samples(sample_id,ts,mac,payload) VALUES(?,?,?,?)',(1,stamp.isoformat(),mac,json.dumps(payload)))
+        result=core.get_router_clients()['clients']
+        self.assertEqual(len(result),1)
+        self.assertEqual(result[0]['names'],['Latest tie fixture'])
+        self.assertEqual(result[0]['observations'],3)
+        self.assertEqual(result[0]['first_seen'],(now-timedelta(days=1)).isoformat())
+
+    def test_different_chart_metrics_share_one_archive_scan(self):
+        monitor=HostMonitor(Path(self.temp.name)/'fixture.db')
+        sample=empty_snapshot();sample['cpu']['usagePercent']=0
+        sample['memory'].update(totalMB=100,usedMB=25)
+        sample['network'].update(rxMbps=1,txMbps=2)
+        monitor.persist(sample)
+        with patch.object(monitor,'query_history',wraps=monitor.query_history) as query:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                values=list(pool.map(lambda name:monitor.history(name,'7d'),['cpu','memory','rx','tx']))
+            self.assertEqual(query.call_count,1)
+            self.assertEqual([v[0]['value'] for v in values],[0,25,1,2])
+            self.assertLessEqual(len(monitor.history_cache),56)
+
     def test_concurrent_identical_host_history_one_query_and_new_persist_invalidates(self):
         monitor=HostMonitor(Path(self.temp.name)/'fixture.db')
         sample=empty_snapshot()

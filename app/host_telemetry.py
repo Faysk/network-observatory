@@ -310,7 +310,7 @@ class HostMonitor:
             cached=self.history_cache.get(key)
             if cached and cached[1]==self.history_generation and time.monotonic()-cached[0]<60:
                 return copy.deepcopy(cached[2])
-            per_key=self.history_key_locks.setdefault(key,threading.Lock())
+            per_key=self.history_key_locks.setdefault(range_name,threading.Lock())
         # Identical requests share one calculation; unrelated metrics do not share the same lock.
         with per_key:
             with self.history_lock:
@@ -332,13 +332,32 @@ class HostMonitor:
         if metric not in METRICS or range_name not in RANGES:raise ValueError('Métrica ou intervalo inválido')
         if not self.path.is_file():return []
         seconds=RANGES[range_name];bucket=max(60,seconds//360)
-        expr={'memory':"100.0*json_extract(payload,'$.memory.usedMB')/nullif(json_extract(payload,'$.memory.totalMB'),0)",
-              'storage':"100.0*json_extract(payload,'$.storage[0].usedGB')/nullif(json_extract(payload,'$.storage[0].totalGB'),0)"}.get(metric)
-        if expr is None:
-            a,b=METRICS[metric];expr=f"json_extract(payload,'$.{a}.{b}')"
+        # Scan the large raw JSON archive once for all chart metrics in a range.
+        # Concurrent cpu/memory/rx/tx readers share the range lock and these results.
+        names=list(METRICS)
+        expressions={
+            'memory':"100.0*json_extract(payload,'$.memory.usedMB')/nullif(json_extract(payload,'$.memory.totalMB'),0)",
+            'storage':"100.0*json_extract(payload,'$.storage[0].usedGB')/nullif(json_extract(payload,'$.storage[0].totalGB'),0)"}
+        for name in names:
+            if name not in expressions:
+                section,field=METRICS[name]
+                expressions[name]=f"json_extract(payload,'$.{section}.{field}')"
+        with self.history_lock:generation=self.history_generation
+        select=','.join('AVG('+expressions[name]+')' for name in names)
         with closing(sqlite3.connect(self.path.resolve().as_uri()+'?mode=ro',uri=True,timeout=2)) as db:
-            rows=db.execute(f'SELECT MIN(ts),AVG({expr}) FROM host_samples WHERE ts>=? GROUP BY CAST(ts/? AS INTEGER) ORDER BY MIN(ts)',(time.time()-seconds,bucket)).fetchall()
-        return [{'time':datetime.fromtimestamp(t,timezone.utc).isoformat(),'value':v} for t,v in rows]
+            rows=db.execute(f'SELECT MIN(ts),{select} FROM host_samples WHERE ts>=? GROUP BY CAST(ts/? AS INTEGER) ORDER BY MIN(ts)',(time.time()-seconds,bucket)).fetchall()
+        result={name:[] for name in names}
+        for row in rows:
+            stamp=datetime.fromtimestamp(row[0],timezone.utc).isoformat()
+            for index,name in enumerate(names):result[name].append({'time':stamp,'value':row[index+1]})
+        with self.history_lock:
+            if generation==self.history_generation:
+                for name in names:
+                    self.history_cache[(name,range_name)]=(time.monotonic(),generation,result[name])
+                while len(self.history_cache)>56:
+                    oldest=min(self.history_cache,key=lambda k:self.history_cache[k][0])
+                    del self.history_cache[oldest]
+        return copy.deepcopy(result[metric])
 
 _monitor=None
 _monitor_lock=threading.Lock()

@@ -279,12 +279,16 @@ def get_router_clients(mac=None, limit=120):
             rows=db.execute('SELECT ts,payload FROM router_client_samples WHERE mac=? ORDER BY ts DESC,id DESC LIMIT ?',
                             (mac,max(1,min(2000,int(limit))))).fetchall()
             return {'mac':mac,'source':'huawei-b7-http','observations':[dict(json.loads(r['payload']),collected_at=r['ts']) for r in rows]}
-        rows=db.execute('''WITH ranked AS (
-                          SELECT ts,payload,mac,ROW_NUMBER() OVER(PARTITION BY mac ORDER BY ts DESC,id DESC) AS rn
-                          FROM router_client_samples),summary AS (
-                          SELECT mac,MIN(ts) AS first_seen,COUNT(*) AS observations FROM router_client_samples GROUP BY mac)
-                          SELECT r.ts,r.payload,g.first_seen,g.observations FROM ranked r JOIN summary g ON g.mac=r.mac
-                          WHERE r.rn=1 ORDER BY r.ts DESC,r.mac''').fetchall()
+        # Count on the narrow MAC/ts index, then read only the latest payload per MAC.
+        # A backfilled older timestamp must not win just because its ID is newer.
+        rows=db.execute('''WITH summary AS (
+                          SELECT mac,MIN(ts) AS first_seen,COUNT(*) AS observations
+                          FROM router_client_samples GROUP BY mac)
+                          SELECT r.ts,r.payload,g.first_seen,g.observations FROM summary g
+                          JOIN router_client_samples r ON r.id=(
+                            SELECT id FROM router_client_samples c WHERE c.mac=g.mac
+                            ORDER BY c.ts DESC,c.id DESC LIMIT 1)
+                          ORDER BY r.ts DESC,r.mac''').fetchall()
         result=[]
         for row in rows:
             item=json.loads(row['payload'])
