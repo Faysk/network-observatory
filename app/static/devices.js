@@ -1,7 +1,7 @@
 /* Real per-device views; raw exports and seven windows use the local historian. */
 (()=>{'use strict';
 const {state:app,$,$$,esc,fmt,time,duration,retention,api,toast,tile,keyvals,empty,chart,trap}=window.FNO;
-const state={id:null,period:'24h',tab:'overview',filter:'all',query:'',bundle:null,request:0};
+const state={id:null,period:'24h',tab:'overview',filter:'all',query:'',bundle:null,request:0,category:'all',limit:40,sort:'status'};
 function devices(){return [...app.clients].sort((a,b)=>(b.reported_status==='Online')-(a.reported_status==='Online')||Boolean(b.names?.length)-Boolean(a.names?.length)).map(c=>{const station=c.stations?.[0],ports=(c.ports||[]).join(' '),network=station||/wifi|wlan/i.test(ports)?'wifi':/eth|LANEthernet|\blan[1-4]\b/i.test(ports)?'wired':'unknown';return {...c,id:c.mac.replaceAll(':',''),name:c.names?.[0]||c.mac,network,station:station||{},recent:app.api&&c.quality==='ok'};});}
 const categoryPaths={"smartphone":"<rect x=\"7\" y=\"2\" width=\"10\" height=\"20\" rx=\"2\"/><path d=\"M11 18h2\"/>","tablet":"<rect x=\"4\" y=\"2\" width=\"16\" height=\"20\" rx=\"2\"/>","laptop":"<rect x=\"5\" y=\"4\" width=\"14\" height=\"12\" rx=\"1\"/><path d=\"M2 19h20l-2-3H4z\"/>","desktop":"<rect x=\"3\" y=\"3\" width=\"18\" height=\"13\" rx=\"2\"/><path d=\"M9 21h6m-3-5v5\"/>","game_console":"<path d=\"M6 8h12c2 0 3 2 4 8l-2 2-4-3H8l-4 3-2-2c1-6 2-8 4-8z\"/><path d=\"M8 10v5m-2.5-2.5h5M16 11h.01M19 13h.01\"/>","smart_tv":"<rect x=\"2\" y=\"4\" width=\"20\" height=\"14\" rx=\"2\"/><path d=\"M8 22h8m-4-4v4\"/>","streaming_box":"<rect x=\"3\" y=\"8\" width=\"18\" height=\"10\" rx=\"3\"/><path d=\"M7 12h.01M17 12h.01\"/>","printer":"<path d=\"M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2\"/><path d=\"M6 15h12v7H6z\"/>","camera":"<rect x=\"2\" y=\"6\" width=\"20\" height=\"15\" rx=\"2\"/><circle cx=\"12\" cy=\"13\" r=\"4\"/>","robot_vacuum":"<circle cx=\"12\" cy=\"12\" r=\"9\"/><circle cx=\"12\" cy=\"12\" r=\"4\"/>","network_device":"<rect x=\"2\" y=\"11\" width=\"20\" height=\"9\" rx=\"2\"/><path d=\"M6 11l-2-6M18 11l2-6\"/>","iot":"<path d=\"M9 18h6m-5 4h4m-5-4c0-3-4-4-4-9a7 7 0 0 1 14 0c0 5-4 6-4 9\"/>","unknown":"<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M9 9a3 3 0 0 1 6 0c0 2-3 2-3 5M12 18h.01\"/>"};
  const categoryNames={"smartphone":"Smartphone","tablet":"Tablet","laptop":"Notebook","desktop":"Computador","game_console":"Console","smart_tv":"Smart TV","streaming_box":"Streaming","printer":"Impressora","camera":"Câmera","robot_vacuum":"Aspirador robô","network_device":"Equipamento de rede","iot":"IoT","unknown":"Não identificado"};
@@ -9,9 +9,92 @@ const categoryPaths={"smartphone":"<rect x=\"7\" y=\"2\" width=\"10\" height=\"2
  function icon(c){return '<svg class="category-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+categoryPaths[category(c)]+'</svg>';}
 function status(c){return !c.recent?'Sem leitura recente':({Online:'Online reportado',Offline:'Offline reportado',Unknown:'Sem indicação'})[c.reported_status];}
 function row(c){return `<button class="device-list-row" data-open-device="${c.id}" aria-label="Ver detalhes e histórico de ${esc(c.name)}"><span class="device-label"><span class="device-avatar cat-${category(c)}">${icon(c)}</span><span class="device-label-text"><strong>${esc(c.name)}</strong><small>${esc(categoryNames[category(c)])} · ${esc(c.network==='wired'?'Ethernet':c.network==='wifi'?'Wi-Fi':'Conexão desconhecida')} · ${esc(c.classification?.confidence==='unknown'?'Sem classificação':'Categoria provável')}</small></span></span><span class="device-col"><small>Estado</small><span class="device-status ${!c.recent||c.reported_status!=='Online'?'offline':''}">${esc(status(c))}</span></span><span class="device-col"><small>Interface</small><strong>${esc(c.network==='wired'?'Ethernet':c.network==='wifi'?'Wi-Fi':'Não determinada')}</strong></span><span class="device-col"><small>Sinal / ligação</small><strong>${c.recent&&c.station.rssi_dbm!=null?fmt(c.station.rssi_dbm)+' dBm':c.network==='wired'?'Cabo LAN':'Sem dados'}</strong></span><span class="device-col"><small>Último IP reportado</small><strong>${esc(c.ips?.[0]||'Sem dados')}</strong></span><svg class="ic device-row-chevron"><use href="#i-chevron"/></svg></button>`;}
-function filtered(){return devices().filter(c=>(state.filter!=='online'||(c.recent&&c.reported_status==='Online'))&&(!['wifi','wired'].includes(state.filter)||c.network===state.filter)&&(!state.query||[c.mac,...(c.names||[]),...(c.ips||[]),...(c.device_types||[])].join(' ').toLocaleLowerCase().includes(state.query)));}
-function renderList(){const list=filtered();$('#deviceList').innerHTML=list.length?list.slice(0,5).map(row).join(''):empty('Nenhum aparelho corresponde à pesquisa, ou o inventário ainda não foi recolhido.');$('.device-list-footer>span').textContent=`${list.length} aparelhos · origem Huawei HTTP · pesquisa por nome, MAC ou IP`;if(state.id===null&&!$('#deviceLayer').hidden)explorer();}
-function explorer(){const list=filtered();$('#deviceDrawerTitle').textContent='Explorar aparelhos';$('#deviceCrumb').textContent='INVENTÁRIO REAL';$('#deviceSubtitle').textContent='Identidade por MAC reportado, sem varreduras adicionais.';$('#deviceIcon').className='identity-symbol cat-unknown';$('#deviceIcon').innerHTML=icon(null);$('#deviceConnectionBadge').textContent=String(list.length);$('#deviceTabs').hidden=true;$('.device-period-wrap').hidden=true;$('#deviceExportCsv').hidden=true;$('#deviceExportJson').hidden=true;$('#deviceDetailContent').innerHTML=`<section class="d-panel"><h3>Equipamentos conhecidos · ${list.length}</h3><p class="d-subtitle">A pesquisa e os filtros da home aplicam-se também a esta lista.</p><div class="device-list">${list.map(row).join('')||empty('Sem aparelhos neste filtro.')}</div></section>`;}
+function deviceState(c){return !c.recent?'stale':c.reported_status==='Online'?'online':c.reported_status==='Offline'?'offline':'unknown';}
+function inventoryPhase(){return app.resources?.inventory?.phase||(!app.api?'loading':'ready');}
+function filtered(){
+ const categoryFilter=state.category;
+ const rows=devices().filter(c=>
+   (state.filter!=='online'||deviceState(c)==='online')&&
+   (state.filter!=='offline'||deviceState(c)==='offline')&&
+   (state.filter!=='stale'||['stale','unknown'].includes(deviceState(c)))&&
+   (!['wifi','wired'].includes(state.filter)||c.network===state.filter)&&
+   (categoryFilter==='all'||category(c)===categoryFilter)&&
+   (!state.query||[c.mac,...(c.names||[]),...(c.ips||[]),...(c.device_types||[]),
+                   categoryNames[category(c)],c.identity?.oui_vendor||''].join(' ').toLocaleLowerCase().includes(state.query))
+ );
+ const rank={online:0,offline:1,unknown:2,stale:3};
+ rows.sort((a,b)=>state.sort==='name'?a.name.localeCompare(b.name,'pt'):
+   state.sort==='recent'?(Date.parse(b.last_seen||0)||0)-(Date.parse(a.last_seen||0)||0):
+    (rank[deviceState(a)]-rank[deviceState(b)])||a.name.localeCompare(b.name,'pt'));
+ return rows;
+}
+function inventoryMessage(list){
+ const phase=inventoryPhase();
+ if(phase==='loading'||phase==='idle')return 'A carregar inventário…';
+ if(phase==='error')return 'Não foi possível carregar o inventário.';
+ if(!app.clients.length)return 'O coletor não reportou identidades MAC.';
+ return list.length?'':'Nenhuma identidade corresponde aos filtros selecionados.';
+}
+function renderList(){
+ const list=filtered(),message=inventoryMessage(list);
+ $('#deviceList').innerHTML=list.length?list.slice(0,5).map(row).join(''):empty(message);
+ $('.device-list-footer>span').textContent=`${list.length} identidades MAC em ${app.clients.length} observadas · Huawei HTTP`;
+ if(state.id===null&&!$('#deviceLayer').hidden)explorer();
+}
+function explorer(){
+ const list=filtered(),totals={online:0,offline:0,stale:0};
+ for(const c of devices()){
+   const value=deviceState(c);
+   if(value==='online')totals.online++;
+   else if(value==='offline')totals.offline++;
+   else totals.stale++;
+ }
+ $('#deviceDrawerTitle').textContent='Explorar identidades';
+ $('#deviceCrumb').textContent='INVENTÁRIO DE REDE';
+ $('#deviceSubtitle').textContent='Um MAC observado não prova um aparelho físico distinto.';
+ $('#deviceIcon').className='identity-symbol cat-unknown';$('#deviceIcon').innerHTML=icon(null);
+ $('#deviceConnectionBadge').textContent=String(app.clients.length)+' MACs';
+ $('#deviceTabs').hidden=true;$('.device-period-wrap').hidden=true;
+ $('#deviceExportCsv').hidden=true;$('#deviceExportJson').hidden=true;
+ const categories=[...new Set(devices().map(category))].sort();
+ // Keep the explorer toolbar in place across polling so search and focus survive.
+ const root=$('#deviceDetailContent');
+ if(!$('#inventoryExplorer',root)){
+   root.innerHTML=`<section class="d-panel" id="inventoryExplorer">
+   <h3>Identidades MAC observadas</h3><p class="d-subtitle">Online e offline são estados reportados; histórico desatualizado é separado.</p>
+   <div class="device-overview-counts" id="inventoryCounts" role="status" aria-live="polite"></div>
+   <div class="device-explorer-tools">
+   <label class="device-explorer-search">Procurar <input id="explorerSearch" type="search" autocomplete="off" placeholder="Nome, MAC, IP ou categoria" value="${esc(state.query)}"></label>
+   <label>Estado <select id="explorerStatus"><option value="all">Todos</option><option value="online">Online reportado</option><option value="offline">Offline reportado</option><option value="stale">Desatualizado / sem estado</option><option value="wifi">Wi-Fi</option><option value="wired">Ethernet</option></select></label>
+   <label>Categoria <select id="explorerCategory"><option value="all">Todas as categorias</option></select></label>
+   <label>Ordenar <select id="explorerSort"><option value="status">Estado e nome</option><option value="name">Nome</option><option value="recent">Última observação</option></select></label>
+   </div>
+   <p class="d-subtitle" id="inventoryCountLabel"></p><div class="device-list" id="explorerRows"></div>
+   <button class="btn-subtle" id="explorerMore" type="button">Mostrar mais identidades</button>
+   </section>`;
+ }
+ const categorySelect=$('#explorerCategory',root);
+ const oldCategory=categorySelect.value;
+ categorySelect.innerHTML='<option value="all">Todas as categorias</option>'+categories.map(x=>'<option value="'+esc(x)+'">'+esc(categoryNames[x])+'</option>').join('');
+ categorySelect.value=categories.includes(state.category)?state.category:'all';
+ $('#explorerStatus',root).value=state.filter;
+ $('#explorerSort',root).value=state.sort;
+ const focused=document.activeElement;
+ const search=$('#explorerSearch',root);
+ if(focused!==search)search.value=state.query;
+ $('#inventoryCounts',root).innerHTML=
+  '<span><b>'+totals.online+'</b> Online reportado</span>'+
+  '<span><b>'+totals.offline+'</b> Offline reportado</span>'+
+  '<span><b>'+totals.stale+'</b> Sem estado atual</span>';
+ $('#inventoryCountLabel',root).textContent=list.length+' de '+app.clients.length+' MACs correspondem aos filtros.';
+ const rows=$('#explorerRows',root);
+ const shown=list.slice(0,state.limit),message=inventoryMessage(list);
+ const markup=shown.map(row).join('')||empty(message);
+ // Avoid replacing item nodes when polling has identical visible content.
+ if(rows.dataset.markup!==markup){rows.innerHTML=markup;rows.dataset.markup=markup;}
+ const more=$('#explorerMore',root);more.hidden=list.length<=state.limit;
+ more.textContent='Mostrar mais ('+shown.length+' de '+list.length+')';
+}
 async function openDevice(id=null){state.lastFocus=document.activeElement;state.id=id;state.period='24h';state.tab='overview';state.bundle=null;$('#deviceLayer').hidden=false;document.body.classList.add('device-open');$('#sidebar').classList.remove('open');$('#menuToggle').setAttribute('aria-expanded','false');$('#deviceDrawerScroll').scrollTop=0;$('#deviceDrawer').focus();if(id===null){explorer();return;}await load();}
 function close(){state.request++;$('#deviceLayer').hidden=true;document.body.classList.remove('device-open');$('#sheetLayer').inert=false;$('.shell').inert=!$('#sheetLayer').hidden;state.lastFocus?.focus();}
 async function load(){const id=state.id,period=state.period,request=++state.request;$('#deviceDetailContent').innerHTML=empty('A carregar observações…');try{const data=await api('/api/v1/devices/'+id+'?period='+period);if(request!==state.request)return;state.bundle=data;render();}catch(error){if(request===state.request){$('#deviceDetailContent').innerHTML=empty('Não foi possível carregar as observações: '+error.message);state.bundle=null;}}}
@@ -35,10 +118,21 @@ function render(){const b=state.bundle;if(!b)return;const c=devices().find(x=>x.
  ['phyChart','phyTrafficChart'].forEach(id=>draw(id,[{key:'link_rx_phy_mbps',label:'RX PHY',color:'#c3a4ff',unit:'Mbit/s'},{key:'link_tx_phy_mbps',label:'TX PHY',color:'#69e9dc',unit:'Mbit/s'}]));
 }
 function exportFile(format){if(!state.id)return;const a=document.createElement('a');a.href=`/api/v1/devices/${state.id}/export.${format}?period=${state.period}`;a.download=`faysk-${state.id}-${state.period}.${format}`;document.body.append(a);a.click();a.remove();toast('Exportação das observações completas do período solicitada.');}
-$('#deviceSearch').addEventListener('input',e=>{state.query=e.target.value.toLocaleLowerCase().trim();renderList();});
-$$('[data-device-filter]').forEach(el=>el.addEventListener('click',()=>{state.filter=el.dataset.deviceFilter;$$('[data-device-filter]').forEach(b=>{const on=b===el;b.classList.toggle('active',on);b.setAttribute('aria-pressed',on);});renderList();}));
+$('#deviceSearch').addEventListener('input',e=>{state.query=e.target.value.toLocaleLowerCase().trim();state.limit=40;renderList();});
+$$('[data-device-filter]').forEach(el=>el.addEventListener('click',()=>{state.filter=el.dataset.deviceFilter;state.limit=40;$$('[data-device-filter]').forEach(b=>{const on=b===el;b.classList.toggle('active',on);b.setAttribute('aria-pressed',on);});renderList();}));
 $('#deviceList').addEventListener('click',e=>{const el=e.target.closest('[data-open-device]');if(el)openDevice(el.dataset.openDevice);});
 $('#deviceDetailContent').addEventListener('click',e=>{const el=e.target.closest('[data-open-device]');if(el)openDevice(el.dataset.openDevice);});
+ $('#deviceDetailContent').addEventListener('click',e=>{if(e.target.closest('#explorerMore')){state.limit+=40;explorer();}});
+ $('#deviceDetailContent').addEventListener('input',e=>{
+   if(e.target.id==='explorerSearch'){state.query=e.target.value.toLocaleLowerCase().trim();state.limit=40;renderList();}
+ });
+ $('#deviceDetailContent').addEventListener('change',e=>{
+   if(e.target.id==='explorerCategory')state.category=e.target.value;
+   else if(e.target.id==='explorerStatus')state.filter=e.target.value;
+   else if(e.target.id==='explorerSort')state.sort=e.target.value;
+   else return;
+   state.limit=40;renderList();
+ });
 $('#deviceOpenAll').addEventListener('click',()=>openDevice());$('#deviceShowAll').addEventListener('click',()=>openDevice());
 $('#deviceClose').addEventListener('click',close);$('#deviceBackdrop').addEventListener('click',close);
 $('#devicePeriods').addEventListener('click',e=>{const el=e.target.closest('[data-dperiod]');if(el){state.period=el.dataset.dperiod;load();}});
