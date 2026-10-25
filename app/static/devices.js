@@ -1,9 +1,14 @@
 /* Real per-device views; raw exports and seven windows use the local historian. */
 (()=>{'use strict';
 const {state:app,$,$$,esc,fmt,time,duration,retention,api,toast,tile,keyvals,empty,chart,trap}=window.FNO;
-const state={id:null,period:'24h',tab:'overview',filter:'all',query:'',bundle:null,request:0};
-function devices(){return [...app.clients].sort((a,b)=>(b.reported_status==='Online')-(a.reported_status==='Online')||Boolean(b.names?.length)-Boolean(a.names?.length)).map(c=>{const station=c.stations?.[0],ports=(c.ports||[]).join(' '),network=station||/wifi|wlan/i.test(ports)?'wifi':/eth|LANEthernet|\blan[1-4]\b/i.test(ports)?'wired':'unknown';return {...c,id:c.mac.replaceAll(':',''),name:c.names?.[0]||c.mac,network,station:station||{},recent:app.api&&c.quality==='ok'};});}
-function status(c){return !c.recent?'Sem leitura recente':({Online:'Online reportado',Offline:'Offline reportado',Unknown:'Sem indicação'})[c.reported_status];}
+const Inventory=window.FNOInventory;
+if(!Inventory)throw Error('FNO inventory selector missing');
+const state={id:null,period:'24h',tab:'overview',filter:'all',query:'',bundle:null,request:0,
+  category:'all',confidence:'all',vendor:'all',macKind:'all',status:'all',sort:'status',limit:40,
+  expandedGroups:{online:true,offline:false,unknown:true,stale:false},explorerScrollTop:0};
+let lastHomeMarkup=null, lastInventorySignature=null;
+function devices(){return Inventory.select(Array.isArray(app.clients)?app.clients:[],{sort:'status'});}
+function status(c){return {online:'Online reportado',offline:'Offline reportado',unknown:'Sem indicação',stale:'Sem leitura recente'}[c.presence||Inventory.presence(c)];}
 const DEVICE_CATEGORIES=new Set(['smartphone','tablet','laptop','desktop','game_console','smart_tv','streaming_box','printer','camera','robot_vacuum','network_device','iot','unknown']);
 const CATEGORY_LABELS={smartphone:'Smartphone provável',tablet:'Tablet provável',laptop:'Notebook provável',desktop:'Computador provável',game_console:'Console provável',smart_tv:'Smart TV provável',streaming_box:'Multimédia provável',printer:'Impressora provável',camera:'Câmara provável',robot_vacuum:'Aspirador robô provável',network_device:'Equipamento de rede provável',iot:'IoT provável',unknown:'Categoria desconhecida'};
 const PLATFORM_LABELS={android:'Android',ios:'iOS/iPadOS',windows:'Windows',linux:'Linux',macos:'macOS'};
@@ -17,9 +22,96 @@ function identitySubtitle(c){
  return label+(platform?' · '+platform:'');
 }
 function row(c){return `<button class="device-list-row" data-open-device="${c.id}" aria-label="Ver detalhes e histórico de ${esc(c.name)}; ${esc(categoryLabel(c))}"><span class="device-label"><span class="device-avatar category-${categoryOf(c)}">${iconMarkup(c)}</span><span class="device-label-text"><strong>${esc(c.name)}</strong><small>${esc(identitySubtitle(c))}</small></span></span><span class="device-col"><small>Estado</small><span class="device-status ${!c.recent||c.reported_status!=='Online'?'offline':''}">${esc(status(c))}</span></span><span class="device-col"><small>Interface</small><strong>${esc(c.network==='wired'?'Ethernet':c.network==='wifi'?'Wi-Fi':'Não determinada')}</strong></span><span class="device-col"><small>Sinal / ligação</small><strong>${c.recent&&c.station.rssi_dbm!=null?fmt(c.station.rssi_dbm)+' dBm':c.network==='wired'?'Cabo LAN':'Sem dados'}</strong></span><span class="device-col"><small>Último IP reportado</small><strong>${esc(c.ips?.[0]||'Sem dados')}</strong></span><svg class="ic device-row-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></button>`;}
-function filtered(){return devices().filter(c=>(state.filter!=='online'||(c.recent&&c.reported_status==='Online'))&&(!['wifi','wired'].includes(state.filter)||c.network===state.filter)&&(!state.query||[c.mac,...(c.names||[]),...(c.ips||[]),...(c.device_types||[])].join(' ').toLocaleLowerCase().includes(state.query)));}
-function renderList(){const list=filtered();$('#deviceList').innerHTML=list.length?list.slice(0,5).map(row).join(''):empty('Nenhum aparelho corresponde à pesquisa, ou o inventário ainda não foi recolhido.');$('.device-list-footer>span').textContent=`${list.length} aparelhos · origem Huawei HTTP · pesquisa por nome, MAC ou IP`;if(state.id===null&&!$('#deviceLayer').hidden)explorer();}
-function explorer(){const list=filtered();$('#deviceDrawerTitle').textContent='Explorar aparelhos';$('#deviceCrumb').textContent='INVENTÁRIO REAL';$('#deviceSubtitle').textContent='Identidade por MAC reportado, sem varreduras adicionais.';$('#deviceIcon').className='identity-symbol category-unknown';$('#deviceIcon').innerHTML=iconMarkup(null);$('#deviceConnectionBadge').textContent=String(list.length);$('#deviceTabs').hidden=true;$('.device-period-wrap').hidden=true;$('#deviceExportCsv').hidden=true;$('#deviceExportJson').hidden=true;$('#deviceDetailContent').innerHTML=`<section class="d-panel"><h3>Equipamentos conhecidos · ${list.length}</h3><p class="d-subtitle">A pesquisa e os filtros da home aplicam-se também a esta lista.</p><div class="device-list">${list.map(row).join('')||empty('Sem aparelhos neste filtro.')}</div></section>`;}
+function filtered(){return Inventory.select(Array.isArray(app.clients)?app.clients:[],state);}
+function renderList(){
+ const list=filtered(),phase=app.resources?.inventory?.phase;
+ const msg=list.length?'':state.query||state.filter!=='all'||state.category!=='all'||state.status!=='all'
+   ?'Nenhuma identidade corresponde à pesquisa ou aos filtros.'
+   :phase==='error'?'O inventário está indisponível.'
+   :phase==='loading'||!app.api?'A aguardar o primeiro inventário…'
+   :'Nenhuma identidade MAC observada.';
+ const markup=list.length?list.slice(0,5).map(row).join(''):empty(msg);
+ if(lastHomeMarkup!==markup){$('#deviceList').innerHTML=markup;lastHomeMarkup=markup;}
+ $('.device-list-footer>span').textContent=`${list.length} identidades MAC · Huawei HTTP · não equivale a ${list.length} aparelhos físicos`;
+ if(state.id===null&&!$('#deviceLayer').hidden)renderExplorerResults();
+}
+function explorer(){
+ const list=filtered();
+ $('#deviceDrawerTitle').textContent='Explorar dispositivos';
+ $('#deviceCrumb').textContent='INVENTÁRIO OBSERVADO';
+ $('#deviceSubtitle').textContent='Cada MAC é uma identidade observada; não equivale necessariamente a um aparelho físico.';
+ $('#deviceIcon').className='identity-symbol category-unknown';
+ $('#deviceIcon').innerHTML=iconMarkup(null);
+ $('#deviceConnectionBadge').textContent=String((app.clients||[]).length);
+ $('#deviceTabs').hidden=true;$('.device-period-wrap').hidden=true;
+ $('#deviceExportCsv').hidden=true;$('#deviceExportJson').hidden=true;
+ const option=(value,label,active)=>'<option value="'+value+'"'+(active===value?' selected':'')+'>'+esc(label)+'</option>';
+ const categories=[['all','Todas as categorias'],...Object.entries(CATEGORY_LABELS)];
+ $('#deviceDetailContent').innerHTML=`<section class="d-panel device-explorer">
+   <div class="device-explorer-heading"><div><h3>Identidades da rede</h3><p class="d-subtitle">Contagens por MAC reportado · sem associação automática entre endereços</p></div><span class="device-explorer-total" id="deviceExplorerTotal"></span></div>
+   <div class="device-explorer-counters" id="deviceExplorerCounters"></div>
+   <div class="device-explorer-toolbar">
+     <label class="device-explorer-search"><span>Pesquisar identidades</span><input id="deviceExplorerSearch" type="search" autocomplete="off" placeholder="Nome, IP, MAC, fabricante…" value="${esc(state.query)}"></label>
+     <label>Categoria<select id="deviceExplorerCategory">${categories.map(([v,label])=>option(v,label,state.category)).join('')}</select></label>
+     <label>Estado<select id="deviceExplorerStatus">${[['all','Todos os estados'],['online','Online reportado'],['offline','Offline reportado'],['unknown','Sem indicação'],['stale','Desatualizado']].map(([v,label])=>option(v,label,state.status)).join('')}</select></label>
+     <label>Ordenar<select id="deviceExplorerSort">${[['status','Por estado'],['name','Nome'],['recent','Última observação'],['signal','Sinal Wi-Fi']].map(([v,label])=>option(v,label,state.sort)).join('')}</select></label>
+   </div>
+   <div class="device-explorer-subfilters" role="group" aria-label="Filtros de identificação">
+     <button type="button" data-inv-filter="macKind" data-value="all">Todos os MACs</button>
+     <button type="button" data-inv-filter="macKind" data-value="local">MAC local</button>
+     <button type="button" data-inv-filter="macKind" data-value="global">MAC global</button>
+     <button type="button" data-inv-filter="vendor" data-value="known">Fabricante encontrado</button>
+     <button type="button" data-inv-filter="confidence" data-value="low">Baixa confiança</button>
+     <button type="button" data-inv-filter="confidence" data-value="unknown">Não classificado</button>
+     <button type="button" data-inv-reset>Limpar filtros</button>
+   </div>
+   <div id="deviceExplorerMessage" role="status" aria-live="polite"></div>
+   <div id="deviceExplorerResults" aria-busy="false"></div>
+   <div class="device-explorer-pagination" id="deviceExplorerPagination"></div>
+ </section>`;
+ renderExplorerResults();
+}
+function renderExplorerResults(){
+ const root=$('#deviceExplorerResults');if(!root)return;
+ const raw=Array.isArray(app.clients)?app.clients:[],all=Inventory.counts(raw),list=filtered();
+ $('#deviceConnectionBadge').textContent=String(all.identities);
+ $('#deviceExplorerTotal').textContent=`${all.identities} MACs observados`;
+ const counters=[['online','Online'],['offline','Offline'],['unknown','Sem indicação'],['stale','Leitura antiga']];
+ const counterMarkup=counters.map(([kind,label])=>`<div class="device-explorer-counter"><small>${label}</small><strong>${all[kind]}</strong></div>`).join('');
+ const summary=$('#deviceExplorerCounters');if(summary.innerHTML!==counterMarkup)summary.innerHTML=counterMarkup;
+ const phase=app.resources?.inventory?.phase||(app.api?'ready':'idle');
+ root.setAttribute('aria-busy',String(phase==='loading'));
+ const message=$('#deviceExplorerMessage');
+ message.textContent=phase==='error'?'Não foi possível carregar o inventário.':
+   phase==='stale'?'Inventário anterior preservado; atualização falhou.':
+   phase==='loading'?'A atualizar inventário…':
+   `${list.length} identidades correspondem aos filtros.`;
+ const groups=[['online','Online reportado'],['offline','Offline reportado'],['unknown','Sem indicação'],['stale','Sem leitura recente']];
+ const visible=list.filter(c=>state.expandedGroups[c.presence]!==false);
+ const shown=visible.slice(0,state.limit);
+ const markup=groups.map(([kind,label])=>{
+   const members=list.filter(c=>c.presence===kind);
+   if(!members.length)return '';
+   const expanded=state.expandedGroups[kind]!==false;
+   const entries=expanded?shown.filter(c=>c.presence===kind).map(row).join(''):'';
+   return `<section class="device-explorer-group" data-group="${kind}"><button class="device-explorer-group-toggle" type="button" data-toggle-group="${kind}" aria-expanded="${expanded}"><span>${esc(label)} · ${members.length}</span><span aria-hidden="true">${expanded?'−':'+'}</span></button>${expanded?'<div class="device-list">'+entries+'</div>':''}</section>`;
+ }).join('');
+ const emptyMessage=phase==='error'&&!all.identities?'Inventário indisponível.':
+   !raw.length?(phase==='loading'||phase==='idle'?'A aguardar primeira leitura…':'Nenhuma identidade foi observada.'):
+   !list.length?'Nenhum resultado corresponde à pesquisa e aos filtros.':
+   !visible.length?'Todos os grupos filtrados estão recolhidos.':'';
+ const content=markup||(emptyMessage?empty(emptyMessage):'');
+ if(root.dataset.markup!==content){root.innerHTML=content;root.dataset.markup=content;}
+ const pages=$('#deviceExplorerPagination');
+ pages.innerHTML=visible.length>state.limit?`<button type="button" data-inv-more>Mostrar mais 40 · ${Math.min(state.limit,visible.length)} de ${visible.length}</button>`:
+   visible.length?`<span>Exibindo ${visible.length} identidades · sem varreduras adicionais</span>`:'';
+ const subfilters=$$('.device-explorer-subfilters [data-inv-filter]');
+ subfilters.forEach(button=>{
+   const active=state[button.dataset.invFilter]===button.dataset.value;
+   button.classList.toggle('active',active);
+   button.setAttribute('aria-pressed',String(active));
+ });
+}
 async function openDevice(id=null){state.lastFocus=document.activeElement;state.id=id;state.period='24h';state.tab='overview';state.bundle=null;$('#deviceLayer').hidden=false;document.body.classList.add('device-open');$('#sidebar').classList.remove('open');$('#menuToggle').setAttribute('aria-expanded','false');$('#deviceDrawerScroll').scrollTop=0;$('#deviceDrawer').focus();if(id===null){explorer();return;}await load();}
 function close(){state.request++;$('#deviceLayer').hidden=true;document.body.classList.remove('device-open');$('#sheetLayer').inert=false;$('.shell').inert=!$('#sheetLayer').hidden;state.lastFocus?.focus();}
 async function load(){const id=state.id,period=state.period,request=++state.request;$('#deviceDetailContent').innerHTML=empty('A carregar observações…');try{const data=await api('/api/v1/devices/'+id+'?period='+period);if(request!==state.request)return;state.bundle=data;render();}catch(error){if(request===state.request){$('#deviceDetailContent').innerHTML=empty('Não foi possível carregar as observações: '+error.message);state.bundle=null;}}}
