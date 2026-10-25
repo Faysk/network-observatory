@@ -50,7 +50,7 @@ RULES = tuple((
     ("camera", r"(?:^|\W)(?:onvif[-_ ]?camera|ip[-_ ]?camera|reolink[-_ ]?camera)(?:$|\W)", "camera", None, "strong"),
     ("network_device", r"(?:^|\W)(?:wifi[-_ ]?repeater|access[-_ ]?point|network[-_ ]?switch)(?:$|\W)", "network_device", None, "strong"),
     ("iot_firmware", r"(?:^|\W)(?:esp32|esp8266|tasmota|sonoff|shelly)(?:$|\W)", "iot", None, "strong"),
-    ("laptop_model", r"(?:^|\W)(?:macbook|thinkpad|ideapad|vivobook|zenbook)(?:$|\W)", "laptop", "macos", "strong"),
+    ("laptop_model", r"(?:^|\W)(?:macbook|thinkpad|ideapad|vivobook|zenbook)(?:$|\W)", "laptop", None, "strong"),
     ("desktop_model", r"(?:^|\W)(?:imac|optiplex|prodesk)(?:$|\W)", "desktop", None, "strong"),
     ("pc_suffix", r"(?:^|[-_ ])pc$", "desktop", None, "weak"),
 ))
@@ -143,6 +143,8 @@ def classify_client(client, *, identity=None):
 
     if "conflicting_device_category_hints" in conflicts:
         category, confidence = "unknown", "unknown"
+    elif "conflicting_platform_hints" in conflicts and confidence != "unknown":
+        confidence = "low"  # conflicting OS hints reduce category certainty
 
     platform = next(iter(platforms)) if len(platforms) == 1 else "unknown"
     if platform not in PLATFORMS: platform = "unknown"
