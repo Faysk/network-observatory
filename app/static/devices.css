@@ -9,3 +9,18 @@
 
 .d-mini-stats.four{grid-template-columns:repeat(4,minmax(0,1fr))}
 @media(max-width:670px){.d-mini-stats.four{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+
+/* Original local SVG category catalogue: readable without colour or icon alone. */
+.device-category-icon{width:22px;height:22px;display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
+.identity-symbol .device-category-icon{width:30px;height:30px}
+.device-avatar.category-smartphone,.device-avatar.category-tablet,.identity-symbol.category-smartphone,.identity-symbol.category-tablet{background:#3a2a4d;border-color:#6f5282;color:#e8caff}
+.device-avatar.category-laptop,.device-avatar.category-desktop,.identity-symbol.category-laptop,.identity-symbol.category-desktop{background:#1b3949;border-color:#3f6878;color:#a9e9fc}
+.device-avatar.category-game_console,.identity-symbol.category-game_console{background:#173d35;border-color:#3a7361;color:#abf4d5}
+.device-avatar.category-smart_tv,.device-avatar.category-streaming_box,.identity-symbol.category-smart_tv,.identity-symbol.category-streaming_box{background:#2a304d;border-color:#505d92;color:#bccbff}
+.device-avatar.category-printer,.device-avatar.category-camera,.device-avatar.category-robot_vacuum,.identity-symbol.category-printer,.identity-symbol.category-camera,.identity-symbol.category-robot_vacuum{background:#423322;border-color:#796044;color:#f9d3a0}
+.device-avatar.category-network_device,.device-avatar.category-iot,.identity-symbol.category-network_device,.identity-symbol.category-iot{background:#183a40;border-color:#43787c;color:#a1e4eb}
+.device-avatar.category-unknown,.identity-symbol.category-unknown{background:#27303e;border-color:#415366;color:#bfcedc}
+.device-list-row:focus-visible{outline:2px solid #a0eddf;outline-offset:2px}
+@media(max-width:670px){.device-avatar .device-category-icon{width:20px;height:20px}.identity-symbol .device-category-icon{width:25px;height:25px}}
+@media(prefers-reduced-motion:reduce){.device-category-icon{animation:none!important;transition:none!important}}
