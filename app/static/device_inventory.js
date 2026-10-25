@@ -56,8 +56,8 @@
     else if(sort==='signal'){
       const va=typeof a.station?.rssi_dbm==='number'?a.station.rssi_dbm:-Infinity;
       const vb=typeof b.station?.rssi_dbm==='number'?b.station.rssi_dbm:-Infinity;
-      primary=vb-va;
-      if(!Number.isFinite(primary))primary=0;
+      primary=va===-Infinity&&vb===-Infinity?0:
+        va===-Infinity?1:vb===-Infinity?-1:vb-va;
     }
     else primary=(RANK[a.presence]??4)-(RANK[b.presence]??4);
     return primary||names()||String(a.mac||'').localeCompare(String(b.mac||''));
