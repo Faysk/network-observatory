@@ -23,3 +23,11 @@ vm.runInContext(source.slice(source.indexOf('async function api('),source.indexO
  assert.equal(cached.period.key,'24h');assert.equal(requests.length,2);
  console.log('Sheet requests: cancelled-key reentry succeeds and valid bundle remains cached.');
 })().catch(e=>{console.error(e);process.exitCode=1});
+
+const inventoryContext={state:{api:true,clients:[],resources:{inventory:{phase:'loading'}}}};
+vm.createContext(inventoryContext);
+vm.runInContext(source.slice(source.indexOf('function appOnline()'),source.indexOf('function renderHome()'))+';this.count=appOnline',inventoryContext);
+assert.equal(inventoryContext.count(),null,'Pending inventory is unknown, not zero');
+inventoryContext.state.resources.inventory.phase='empty';assert.equal(inventoryContext.count(),0);
+inventoryContext.state.resources.inventory.phase='error';assert.equal(inventoryContext.count(),null);
+console.log('Inventory feedback: loading/error stay unknown; confirmed empty stays zero.');
