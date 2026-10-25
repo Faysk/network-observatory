@@ -161,16 +161,76 @@ function render(){const b=state.bundle;if(!b)return;const c=devices().find(x=>x.
  ['phyChart','phyTrafficChart'].forEach(id=>draw(id,[{key:'link_rx_phy_mbps',label:'RX PHY',color:'#c3a4ff',unit:'Mbit/s'},{key:'link_tx_phy_mbps',label:'TX PHY',color:'#69e9dc',unit:'Mbit/s'}]));
 }
 function exportFile(format){if(!state.id)return;const a=document.createElement('a');a.href=`/api/v1/devices/${state.id}/export.${format}?period=${state.period}`;a.download=`faysk-${state.id}-${state.period}.${format}`;document.body.append(a);a.click();a.remove();toast('Exportação das observações completas do período solicitada.');}
-$('#deviceSearch').addEventListener('input',e=>{state.query=e.target.value.toLocaleLowerCase().trim();renderList();});
+$('#deviceSearch').addEventListener('input',e=>{
+ state.query=e.target.value.toLocaleLowerCase().trim();
+ state.limit=40;renderList();
+});
 $$('[data-device-filter]').forEach(el=>el.addEventListener('click',()=>{state.filter=el.dataset.deviceFilter;$$('[data-device-filter]').forEach(b=>{const on=b===el;b.classList.toggle('active',on);b.setAttribute('aria-pressed',on);});renderList();}));
 $('#deviceList').addEventListener('click',e=>{const el=e.target.closest('[data-open-device]');if(el)openDevice(el.dataset.openDevice);});
-$('#deviceDetailContent').addEventListener('click',e=>{const el=e.target.closest('[data-open-device]');if(el)openDevice(el.dataset.openDevice);});
+$('#deviceDetailContent').addEventListener('input',e=>{
+ if(e.target.id==='deviceExplorerSearch'){
+   state.query=e.target.value.toLocaleLowerCase().trim();
+   state.limit=40;
+   if($('#deviceSearch'))$('#deviceSearch').value=e.target.value;
+   renderList();
+ }
+});
+$('#deviceDetailContent').addEventListener('change',e=>{
+ const field={deviceExplorerCategory:'category',deviceExplorerStatus:'status',deviceExplorerSort:'sort'}[e.target.id];
+ if(field){state[field]=e.target.value;state.limit=40;renderList();}
+});
+$('#deviceDetailContent').addEventListener('click',e=>{
+ const back=e.target.closest('[data-inv-back]');if(back){backToExplorer();return;}
+ const item=e.target.closest('[data-open-device]');if(item){openDevice(item.dataset.openDevice);return;}
+ const more=e.target.closest('[data-inv-more]');if(more){state.limit+=40;renderExplorerResults();return;}
+ const toggle=e.target.closest('[data-toggle-group]');if(toggle){
+   const kind=toggle.dataset.toggleGroup;
+   if(Inventory.STATES.includes(kind)){state.expandedGroups[kind]=!state.expandedGroups[kind];renderExplorerResults();}
+   return;
+ }
+ const filtered=e.target.closest('[data-inv-filter]');if(filtered){
+   const key=filtered.dataset.invFilter,value=filtered.dataset.value;
+   if(['vendor','confidence','macKind'].includes(key)){
+     state[key]=state[key]===value&&value!=='all'?'all':value;
+     state.limit=40;renderList();
+   }
+   return;
+ }
+ if(e.target.closest('[data-inv-reset]')){
+   Object.assign(state,{filter:'all',query:'',category:'all',confidence:'all',vendor:'all',macKind:'all',status:'all',sort:'status',limit:40});
+   if($('#deviceSearch'))$('#deviceSearch').value='';
+   const search=$('#deviceExplorerSearch');if(search)search.value='';
+   ['Category','Status','Sort'].forEach(name=>{
+     const el=$('#deviceExplorer'+name);if(el)el.value=name==='Sort'?'status':'all';
+   });
+   $$('[data-device-filter]').forEach(el=>{
+     const active=el.dataset.deviceFilter==='all';el.classList.toggle('active',active);
+     el.setAttribute('aria-pressed',String(active));
+   });
+   renderList();
+ }
+});
 $('#deviceOpenAll').addEventListener('click',()=>openDevice());$('#deviceShowAll').addEventListener('click',()=>openDevice());
 $('#deviceClose').addEventListener('click',close);$('#deviceBackdrop').addEventListener('click',close);
 $('#devicePeriods').addEventListener('click',e=>{const el=e.target.closest('[data-dperiod]');if(el){state.period=el.dataset.dperiod;load();}});
 $('#deviceTabs').addEventListener('click',e=>{const el=e.target.closest('[data-dtab]');if(el){state.tab=el.dataset.dtab;render();}});
 $('#deviceExportCsv').addEventListener('click',()=>exportFile('csv'));$('#deviceExportJson').addEventListener('click',()=>exportFile('json'));
-document.addEventListener('fno:update',()=>{renderList();if(state.id&&!$('#deviceLayer').hidden)load();});document.addEventListener('fno:devices',()=>openDevice());
+document.addEventListener('fno:update',()=>{
+ const signature=JSON.stringify([app.clients,app.resources?.inventory?.phase]);
+ if(signature===lastInventorySignature)return;
+ lastInventorySignature=signature;
+ renderList();
+ // Device historian is not refetched for every unrelated status/overview tick.
+ if(state.id&&!$('#deviceLayer').hidden){
+   const c=devices().find(device=>device.id===state.id);
+   if(c){
+     $('#deviceConnectionBadge').textContent=status(c);
+     $('#deviceIcon').className='identity-symbol category-'+categoryOf(c);
+     $('#deviceIcon').innerHTML=iconMarkup(c);
+   }
+ }
+});
+document.addEventListener('fno:devices',()=>openDevice());
 document.addEventListener('keydown',e=>{if(!$('#deviceLayer').hidden){if(e.key==='Escape')close();else trap(e,$('#deviceDrawer'));}});
 renderList();
 })();
