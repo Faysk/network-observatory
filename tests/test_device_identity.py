@@ -52,7 +52,7 @@ class MacIdentityTests(unittest.TestCase):
         from pathlib import Path
         with tempfile.TemporaryDirectory() as root:
             local=Path(root)/'test-ieee.csv'
-            local.write_text('Assignment,Organization Name\\n001122,Fixture Registrant\\n',encoding='utf-8')
+            local.write_text('Assignment,Organization Name\n001122,Fixture Registrant\n',encoding='utf-8')
             items=ident.load_ieee_csv(local,24)
             self.assertEqual(items,[{'prefix':'001122','prefix_bits':24,'registrant':'Fixture Registrant'}])
         table=('fixture', {(24,'001122'):'Fixture Registrant'})
