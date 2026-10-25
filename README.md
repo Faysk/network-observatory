@@ -31,11 +31,18 @@ O inventário em `GET /api/router/clients` agora expõe um campo de **evidência
 
 Veja [manual de instalação, limites e QA](docs/DEVICE_IDENTITY_OUI.md). Há testes sintéticos em `tests/test_device_identity.py`.
 
+## Classificação automática conservadora (issue #8)
+
+`GET /api/router/clients` passa a devolver `classification` (categoria, família de plataforma, sugestão de nome, confiança qualitativa, evidências, conflitos, versão das regras) em paralelo ao `identity` MAC/OUI e aos dados originais. O motor é determinístico, sem IA ou coleta adicional. `MSFT 5.0`, `android-dhcp`, o tipo Wi-Fi/LAN e a marca do OUI **não** comprovam um modelo ou plataforma; conflitos e desconhecidos são representados honestamente.
+
+[Taxonomia, precedências, evidências e limites](docs/DEVICE_CLASSIFIER.md). A experiência visual está reservada para as issues #9 e #10.
+
 ## Validação
 
 ```sh
 python -m unittest discover -s tests -v
 python -m unittest tests.test_device_identity -v
+python -m unittest tests.test_device_classifier -v
 node tests/test_s7_ui.cjs
 node --check app/static/app.js
 ```
