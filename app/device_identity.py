@@ -101,7 +101,10 @@ class OuiRegistry:
                     ord(char) < 32 for char in vendor
                 ):
                     raise ValueError("Invalid OUI vendor")
-                result[(bits, prefix)] = vendor
+                key = (bits, prefix)
+                if key in result and result[key] != vendor:
+                    raise ValueError("Conflicting assignee for same OUI prefix")
+                result[key] = vendor
         return cls(result, version=version, path=str(path))
 
     def lookup(self, normalized):
