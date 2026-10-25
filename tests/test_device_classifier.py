@@ -93,6 +93,7 @@ class ClassifierRules(unittest.TestCase):
         self.assertEqual(result['category'],'smartphone')
         self.assertEqual(result['platform_family'],'unknown')
         self.assertIn('conflicting_platform_hints',result['conflicts'])
+        self.assertEqual(result['confidence'],'low')
 
     def test_mac_vendor_and_interface_never_prove_category(self):
         vendor = {'oui_vendor':'Example Electronics Inc.', 'mac_type':'global',
