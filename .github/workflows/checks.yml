@@ -17,4 +17,5 @@ jobs:
       - run: node tests/test_s7_ui.cjs
       - run: node --check app/static/devices.js
       - run: node tests/test_device_icons.cjs
+      - run: node tests/test_device_explorer.cjs
       - run: node --check app/static/app.js
