@@ -23,3 +23,19 @@
 .cat-unknown{color:#adb4c2;background:#30303c;border-color:#4f5163}
 .device-list-row:focus-visible{outline:2px solid #9cead9;outline-offset:2px}
 @media(prefers-reduced-motion:reduce){.device-list-row{transition:none!important;transform:none!important}}
+
+/* Device explorer: compact metrics and progressive accessible filters. */
+.device-overview-counts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:15px 0}
+.device-overview-counts span{display:flex;flex-direction:column;gap:4px;padding:12px 13px;border:1px solid #355065;border-radius:12px;background:#162232;color:#a9c2d0;font-size:11px}
+.device-overview-counts b{color:#f3f7ff;font-size:23px;font-variant-numeric:tabular-nums}
+.device-explorer-tools{display:grid;grid-template-columns:minmax(190px,2fr) repeat(3,minmax(115px,1fr));gap:10px;align-items:end;margin:14px 0 11px}
+.device-explorer-tools label{display:grid;gap:6px;color:#a8c4d0;font-size:11px;font-weight:650}
+.device-explorer-tools input,.device-explorer-tools select{width:100%;min-width:0;min-height:42px;padding:9px 11px;border:1px solid #395268;border-radius:9px;background:#142330;color:#edf8fb;font:inherit}
+.device-explorer-tools input:focus-visible,.device-explorer-tools select:focus-visible,#explorerMore:focus-visible{outline:2px solid #9ce9d2;outline-offset:2px}
+#inventoryExplorer #explorerRows{margin:13px 0}
+#inventoryExplorer .device-list-row{min-width:0}
+#explorerMore{margin:12px auto;display:block}
+#explorerMore[hidden]{display:none}
+#inventoryCountLabel{overflow-wrap:anywhere}
+@media(max-width:1050px){.device-explorer-tools{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.device-explorer-tools{grid-template-columns:1fr}.device-overview-counts{grid-template-columns:repeat(3,minmax(0,1fr))}.device-overview-counts span{padding:8px;font-size:9px}.device-overview-counts b{font-size:20px}}
