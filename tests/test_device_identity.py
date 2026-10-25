@@ -161,6 +161,26 @@ class RouterInventoryIntegration(unittest.TestCase):
         self.patcher.stop()
         self.tmp.cleanup()
 
+    def test_http_inventory_enrichment_is_read_only_and_json_serializable(self):
+        import urllib.request
+        from http.server import ThreadingHTTPServer
+        from app.server import Handler
+        server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
+        worker=threading.Thread(target=server.serve_forever,daemon=True)
+        worker.start()
+        try:
+            url=f"http://127.0.0.1:{server.server_address[1]}/api/router/clients"
+            with urllib.request.urlopen(url,timeout=4) as response:
+                self.assertEqual(response.status,200)
+                self.assertEqual(response.headers.get('Cache-Control'),'no-store')
+                payload=json.load(response)
+            self.assertEqual(payload['clients'][0]['identity']['oui_vendor'],'Fixture Small Block')
+            self.assertNotIn('identity',core.get_router_clients(mac=self.mac)['observations'][0])
+        finally:
+            server.shutdown()
+            server.server_close()
+            worker.join(3)
+
     def test_read_only_enrichment_retains_original_history_and_status(self):
         b=core.get_router_clients()
         self.assertEqual(len(b['clients']),1)
