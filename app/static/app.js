@@ -11,7 +11,7 @@ const state={status:null,overview:null,clients:[],metric:null,period:'24h',bundl
  status:{phase:'idle'},overview:{phase:'idle'},inventory:{phase:'idle'}
  }};
 const config={
- traffic:{title:'Contadores WAN',desc:'Bytes cumulativos reportados. Não são consumo do período nem velocidade de Internet.',a:'wan_rx_bytes',b:'wan_tx_bytes',main:'RX reportado',secondary:'TX reportado',unit:'GiB',scale:2**30},
+ traffic:{title:'Contadores WAN',desc:'Bytes cumulativos reportados. Não são consumo do período nem velocidade de Internet.',a:'wan_rx_bytes',b:'wan_tx_bytes',main:'Contador RX',secondary:'Contador TX',unit:'GiB',scale:2**30},
  router:{title:'Router Huawei',desc:'CPU e memória reais; temperatura óptica não é temperatura da CPU.',a:'cpu_pct',b:'memory_pct',main:'CPU',secondary:'RAM',unit:'%',scale:1},
  latency:{title:'Desempenho e conectividade',desc:'Tempo de ligação TCP do servidor ao gateway e a 1.1.1.1:443. Não é ping, DNS ou teste de velocidade.',a:'router_ms',b:'internet_ms',main:'TCP gateway',secondary:'TCP exterior',unit:'ms',scale:1,probes:true},
  devices:{title:'Presença dos aparelhos',desc:'Aparelhos reportados online em cada amostra. Ausência na tabela não prova desconexão.',a:'online_clients',b:null,main:'Online reportados',unit:'aparelhos',scale:1},
@@ -20,13 +20,17 @@ const config={
  events:{title:'Eventos e logs',desc:'Eventos persistidos pela aplicação. Logs internos do router não são recolhidos.',a:null,b:null,main:'Eventos',unit:'',scale:1},
  integrations:{title:'Integrações e fontes',desc:'Estados derivados das últimas leituras recebidas, sem introdução de tokens no navegador.',a:null,b:null,main:'Fontes',unit:'',scale:1}
 };
+function parseTelemetryJson(text){
+ const tokens=/"(?:\\.|[^"\\])*"|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/g;
+ return JSON.parse(text.replace(tokens,token=>token[0]!== '"'&&!/[.eE]/.test(token)&&!Number.isSafeInteger(Number(token))?JSON.stringify(token):token));
+}
 async function api(url,{signal,timeout=20000}={}){
  const controller=new AbortController(),relay=()=>controller.abort();
  if(signal){if(signal.aborted)controller.abort();else signal.addEventListener('abort',relay,{once:true});}
  const timer=setTimeout(()=>controller.abort(),timeout);
  try{const r=await fetch(url,{signal:controller.signal,cache:'no-store'});
    if(!r.ok)throw Error('Resposta '+r.status);
-   return await r.json();
+   return r.text?parseTelemetryJson(await r.text()):await r.json();
  }finally{clearTimeout(timer);signal?.removeEventListener('abort',relay);}
 }
 const bundleCache=new Map(),sheetFlights=new Map(),BUNDLE_TTL=20000;
@@ -148,7 +152,8 @@ function seriesPath(series,key,period,x,y){
  for(const p of series){
    const value=p[key];if(!Number.isFinite(value)){previous=null;continue;}
    const incomplete=!period.sampled_preview&&(p.max_gap_seconds>180||(p.values?.[key]?.sample_count<p.sample_count));
-   const gap=previous&&(period.sampled_preview?
+   const counterDrop=previous&&['wan_rx_bytes','wan_tx_bytes'].includes(key)&&value<previous[key];
+   const gap=counterDrop||previous&&(period.sampled_preview?
      Math.floor((Date.parse(p.timestamp)-origin)/(resolution*1000))-Math.floor((Date.parse(previous.timestamp)-origin)/(resolution*1000))>1:
      Date.parse(p.timestamp)-Date.parse(previous.timestamp_end||previous.timestamp)>180000);
    path+=`${previous&&!gap&&!incomplete?'L':'M'}${x(p.timestamp).toFixed(2)},${y(value).toFixed(2)} `;
@@ -210,9 +215,11 @@ function renderHome(){
  $('#health-title').textContent=current?'A tua rede, em observação.':'A aguardar telemetria.';
  $('.hero-main p').textContent=probeCurrent?`Gateway: ${probe.router_online==null?'sem dados':probe.router_online?'responde':'sem resposta TCP'} · exterior: ${probe.internet_online==null?'sem dados':probe.internet_online?'responde':'sem resposta TCP'}.`:'Sem sondas TCP recentes para avaliar a conectividade.';
  const coverage=o?.quality?.coverage_percent;
+ $('.signal-main p').textContent='Percentual da janela com uma coleta gravada há no máximo 3 minutos. Não é disponibilidade da Internet.';
  $('[data-metric="score"]').textContent=fmt(coverage,1);$('.quality-dial strong').textContent=fmt(coverage,1);
  $('.ring-fill').style.strokeDashoffset=String(2*Math.PI*49*(1-(coverage||0)/100));$('.dial-value').style.strokeDashoffset=String(2*Math.PI*37*(1-(coverage||0)/100));
- $('.score-copy>strong').textContent=`${fmt(o?.quality?.sample_count,0)} amostras`;
+ $('.score-copy>strong').textContent=`${fmt(o?.quality?.sample_count,0)} coletas`;
+ $('.score-copy small').textContent='Leitura recente: até 3 min · intervalo médio '+fmt(o?.quality?.observed_interval_mean_seconds,1)+' s';
  $('.hero-score .score-ring').setAttribute('aria-label',`Cobertura da recolha: ${fmt(coverage)} por cento`);
  let wan=current?Object.entries(h.wan_states||{}).find(([,v])=>v.services?.includes('Internet'))?.[0]:null;
  const counters=wan?h.interfaces?.[wan]:null;
@@ -224,7 +231,7 @@ function renderHome(){
  $('.traffic-summary-values').innerHTML=`<div><span class="label-with-dot"><i class="series-dot download"></i> RX REPORTADO</span><strong>${fmt(counters?.rx_bytes==null?null:counters.rx_bytes/2**30,2)} <small>GiB</small></strong></div><div><span class="label-with-dot"><i class="series-dot upload"></i> TX REPORTADO</span><strong>${fmt(counters?.tx_bytes==null?null:counters.tx_bytes/2**30,2)} <small>GiB</small></strong></div><div class="mini-time">${esc(time(h.collected_at))}</div>`;
  if(o)chart($('#overviewChart'),o.series,[{key:'wan_rx_bytes',label:'RX acumulado',color:'#c3a4ff',scale:2**30,unit:'GiB'},{key:'wan_tx_bytes',label:'TX acumulado',color:'#69e9dc',scale:2**30,unit:'GiB'}],{...o.period,sampled_preview:!!o.summary?.sampled});
  $('.axis-row').hidden=true;
- $('.signal-foot').innerHTML=`<span>TCP gateway<strong>${fmt(probeCurrent?probe.router_ms:null)} ms</strong></span><span>Perda ICMP<strong>Sem dados</strong></span><span>DNS<strong>Sem dados</strong></span>`;
+ $('.signal-foot').innerHTML=`<span>TCP gateway<strong>${fmt(probeCurrent?probe.router_ms:null)} ms</strong></span><span>TCP exterior<strong>${fmt(probeCurrent?probe.internet_ms:null)} ms</strong></span><span>Última sonda<strong>${esc(time(probe?.ts))}</strong></span>`;
  const events=o?.events||[];$('.nav-number').textContent=String(events.length);
  $('.event-preview').innerHTML=events.length?events.slice(0,3).map(e=>`<button class="event-line event-open" data-event="${e.id}"><span class="event-dot ${e.severity==='warning'||e.severity==='critical'?'amber-dot':'mint-dot'}"></span><span><strong>${esc(e.title)}</strong><small>${esc(time(e.ts))}</small></span><span class="event-pill neutral-pill">${esc(e.severity)}</span></button>`).join(''):empty('Sem eventos registados nesta janela.');
  ['traffic','latency','router','devices'].forEach(metric=>{
@@ -252,7 +259,7 @@ async function refresh(){
 function integrationPanel(){const s=state.status,h=s?.huawei||{},probe=s?.probe,partial=Object.entries(h.sections||{}).filter(([k,v])=>k!=='router_logs'&&v!=='ok').map(([k])=>k);return keyvals([
  ['Huawei HTTP',state.api&&h.quality==='ok'?(partial.length?'Parcial ('+partial.join(', ')+') · ':'Ativo · ')+time(h.collected_at):'Sem leitura recente'],
  ['Sondas TCP',state.api&&probe&&fresh(probe.ts)?'Ativas · '+time(probe.ts):'Sem leitura recente'],
- ['Histórico SQLite',state.api?'Disponível · retenção: '+retention(s.retention_days):'Servidor sem resposta'],['Logs internos Huawei','Não recolhidos'],['Consumo por aparelho','Sem fonte validada'],['Autenticação','Gerida internamente pelo coletor'],['Fila persistente',state.api&&s.recording?fmt(s.recording.pending_samples,0)+' amostras pendentes':'Sem dados'],['Exportação','CSV/JSON completos por aparelho e período']]);}
+ ['Intervalo médio observado',fmt(state.overview?.quality?.observed_interval_mean_seconds,1)+' s'],['Histórico SQLite',state.api?'Disponível · retenção: '+retention(s.retention_days):'Servidor sem resposta'],['Logs internos Huawei','Não recolhidos'],['Consumo por aparelho','Sem fonte validada'],['Autenticação','Gerida internamente pelo coletor'],['Fila persistente',state.api&&s.recording?fmt(s.recording.pending_samples,0)+' amostras pendentes':'Sem dados'],['Exportação','CSV/JSON completos por aparelho e período']]);}
 function panelExtras(metric){const h=state.status?.huawei||{},fresh=state.api&&h.quality==='ok';if(metric==='integrations')return integrationPanel();if(!fresh&&['router','wifi'].includes(metric))return empty('Sem leitura atual. Consulta o histórico e a hora das amostras.');
  if(metric==='router')return keyvals([['Firmware',h.firmware],['RAM',fmt(h.metrics?.memory_pct)+'%'],['Tempo ligado',duration(h.metrics?.uptime_seconds)],['Óptica RX',fmt(h.metrics?.optical_rx_dbm)+' dBm'],['Óptica TX',fmt(h.metrics?.optical_tx_dbm)+' dBm'],['Temperatura do transceiver',fmt(h.metrics?.optical_temp_c)+' °C'],['PON',h.health?.pon_connected==null?'Sem dados':h.health.pon_connected?'Ligado':'Desligado'],...Object.entries(h.interfaces||{}).map(([k,v])=>[k.toUpperCase(),`RX ${fmt(v.rx_bytes,0)} bytes · TX ${fmt(v.tx_bytes,0)} bytes · erros RX/TX ${fmt(v.rx_errors,0)}/${fmt(v.tx_errors,0)}${k.startsWith('lan')?` · ${v.link_up==null?'estado não reportado':v.link_up?'ligada '+fmt(v.speed_mbps,0)+' Mbit/s':'sem ligação'}`:''}`])]);
  if(metric==='wifi')return keyvals(Object.entries(h.wifi||{}).map(([k,v])=>[k.toUpperCase(),`${v.enabled==null?'Estado não reportado':v.enabled?'Ativa':'Inativa'} · ${v.band||'banda desconhecida'} · canal ${fmt(v.channel,0)} · RX ${fmt(v.rx_bytes,0)} bytes · TX ${fmt(v.tx_bytes,0)} bytes · erros ${fmt(v.rx_errors,0)}/${fmt(v.tx_errors,0)}`]));

@@ -1,7 +1,7 @@
 import json
 from io import StringIO
 from unittest.mock import patch
-from app.host_sources import collect, kernel_release
+from app.host_sources import collect, kernel_release, positive, boolean, percentage
 import tempfile
 import unittest
 from app.host_telemetry import HostMonitor
@@ -35,6 +35,11 @@ class DetailedHostTests(unittest.TestCase):
         self.assertEqual(s['pressure.cpu']['status'],'absent')
         self.assertEqual(s['process.status']['value'],{'Threads':2,'VmRSS':40})
         self.assertEqual(s['memory.meminfo']['value']['MemFree'],0)
+    def test_unknown_speed_boolean_and_capacity_are_not_real_zero(self):
+        self.assertEqual(percentage('0'),0);self.assertEqual(boolean('0'),0);self.assertEqual(positive('100'),100)
+        for fn,value in [(positive,'-1'),(boolean,'2'),(percentage,'101')]:
+            with self.assertRaises(ValueError):fn(value)
+
     def test_catalog_has_provenance_without_copying_values(self):
         self.monitor.snapshot_data['details']={'metrics':{'x':{'value':123,'status':'ok','unit':'bytes','source':'test'}}}
         self.assertEqual(self.monitor.catalog()['sources']['x'],{'status':'ok','unit':'bytes','source':'test'})

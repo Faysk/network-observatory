@@ -3,6 +3,8 @@ from .host_sources import cpu_ids, kernel_release
 from . import request_timing
 import copy
 import secrets
+import math
+from .metric_math import percentile
 import json
 import os
 from pathlib import Path
@@ -26,7 +28,9 @@ def read(path):
     except (OSError,UnicodeError):return None
 
 def number(value, scale=1):
-    try:return float(value)/scale
+    try:
+        result=float(value)/scale
+        return result if math.isfinite(result) else None
     except (ValueError,TypeError):return None
 
 def empty_snapshot():
@@ -82,7 +86,7 @@ class HostMonitor:
         usage={}
         for key,(total,idle) in current.items():
             old=self.previous_cpu.get(key)
-            usage[key]=round(100*(1-(idle-old[1])/(total-old[0])),2) if old and total>old[0] else None
+            usage[key]=round(100*(1-(idle-old[1])/(total-old[0])),2) if old and total>old[0] and 0<=idle-old[1]<=total-old[0] else None
         self.previous_cpu=current
         return usage.get('cpu'),[usage[k] for k in sorted(current,key=lambda k:int(k[3:]) if k!='cpu' else -1) if k!='cpu']
     def agent_cpu(self):
@@ -133,7 +137,7 @@ class HostMonitor:
             for name,new in frames['after'].items():
                 old=frames['before'].get(name)
                 if old is None:continue
-                delta=sum(new)-sum(old);idle=sum(new[3:5])-sum(old[3:5])
+                delta=sum(new[:8])-sum(old[:8]);idle=sum(new[3:5])-sum(old[3:5])
                 usage[name]=round(100*(delta-idle)/delta,2) if delta>0 and 0<=idle<=delta else None
             if usage.get('cpu') is None:raise ValueError('missing aggregate')
             result.update(status='ok',usagePercent=usage['cpu'],coresPercent=[usage.get('cpu'+str(i)) for i in range(max(cpu_ids(),default=-1)+1)],rawFrames=frames,bootTimes=times,extraCounters=extra)
@@ -159,6 +163,8 @@ class HostMonitor:
                 b.update(levelPercent=number(d.get('percentage')),temperatureC=number(d.get('temperature')),
                          voltageMV=number(d.get('voltage')),status=d.get('status'),health=d.get('health'),plugged=d.get('plugged'))
             except (OSError,ValueError,subprocess.TimeoutExpired):pass
+        if b['levelPercent'] is not None and not 0<=b['levelPercent']<=100:b['levelPercent']=None
+        if b['voltageMV'] is not None and b['voltageMV']<0:b['voltageMV']=None
         return b
     def network(self):
         n=empty_snapshot()['network'];raw=read('/proc/net/dev');now=time.monotonic()
@@ -168,8 +174,10 @@ class HostMonitor:
             if interface:
                 n['interface']=interface;v=rows[interface];rx,tx=int(v[0]),int(v[8])
                 old=self.previous_net
-                if old and old[0]==interface and now>old[3] and rx>=old[1] and tx>=old[2]:
-                    n['rxMbps']=round((rx-old[1])*8/(now-old[3])/1e6,4);n['txMbps']=round((tx-old[2])*8/(now-old[3])/1e6,4)
+                if old and old[0]==interface and 0<now-old[3]<=180:
+                    n['windowSeconds']=round(now-old[3],3)
+                    if rx>=old[1]:n['rxMbps']=round((rx-old[1])*8/(now-old[3])/1e6,4)
+                    if tx>=old[2]:n['txMbps']=round((tx-old[2])*8/(now-old[3])/1e6,4)
                 self.previous_net=(interface,rx,tx,now)
                 state=read('/sys/class/net/'+interface+'/operstate');n['connected']=True if state=='up' else False if state=='down' else None
         if platform.system()=='Linux':
@@ -194,15 +202,16 @@ class HostMonitor:
         agent=self.agent_cpu()
         if agent['status']=='ok':
             s['cpu']['usagePercent']=agent['usagePercent'];s['cpu']['coresPercent']=agent['coresPercent']
-        frequencies=[number(read(p),1000) for p in Path('/sys/devices/system/cpu').glob('cpu[0-9]*/cpufreq/scaling_cur_freq')]
+        frequencies=[number(read(p),1000) for p in Path('/sys/devices/system/cpu').glob('cpu[0-9]*/cpufreq/scaling_cur_freq') if read(p.parent.parent/'online')!='0']
         frequencies=[v for v in frequencies if v is not None]
         s['cpu']['frequencyMHz']=round(sum(frequencies)/len(frequencies)) if frequencies else None
         mem={}
         for line in (read('/proc/meminfo') or '').splitlines():
             k,_,v=line.partition(':');mem[k]=number(v.strip().split(' ')[0],1024)
         total=mem.get('MemTotal');available=mem.get('MemAvailable')
-        s['memory']={'totalMB':total,'usedMB':total-available if total is not None and available is not None else None,
-                     'cachedMB':mem.get('Cached'),'swapMB':mem.get('SwapTotal')}
+        s['memory']={'totalMB':total,'usedMB':total-available if total is not None and available is not None and 0<=available<=total else None,
+                     'availableMB':available,'cachedMB':mem.get('Cached'),'swapMB':mem.get('SwapTotal'),
+                     'swapUsedMB':mem['SwapTotal']-mem['SwapFree'] if mem.get('SwapTotal') is not None and mem.get('SwapFree') is not None and 0<=mem['SwapFree']<=mem['SwapTotal'] else None}
         s['battery']=self.battery();s['network']=self.network()
         home=Path.home();sd=home/'storage/external-1'
         for ident,label,path in [('internal','Armazenamento interno',home),('sd','Cartão microSD',sd)]:
@@ -231,7 +240,7 @@ class HostMonitor:
             'processCpuSemantics':'100% = um núcleo ocupado','processUptimeSec':round(now-self.started),'databaseMB':size(self.main_db)/1024**2,
             'walMB':size(Path(str(self.main_db)+'-wal'))/1024**2,'sqliteReadMs':query_ms,'routerCollectionMs':collection,
             'apiMeanMs':round(sum(api_values)/len(api_values),2) if api_values else None,
-            'apiP95Ms':api_values[min(len(api_values)-1,int(len(api_values)*.95))] if api_values else None,
+            'apiP95Ms':percentile(api_values),
             'apiSamples':len(api),'apiWindow':'últimas 128 requisições API, sem /api/host',
             'slowRoutes':[{'path':k,'ms':v} for k,v in sorted(api,key=lambda p:p[1],reverse=True)[:5]],
             'dataLocation':str(self.main_db.parent),'pendingSamples':sum(1 for _ in (self.main_db.parent/'outbox').glob('*.json')),
@@ -249,7 +258,8 @@ class HostMonitor:
         s['details']=collect();s['details']['measuredAt']=s['timestamp']
         s['details']['inventory']={'kernelRelease':kernel_release(),'architecture':platform.machine(),'pythonVersion':platform.python_version()}
         s['details']['hostDatabase']={'bytes':size(self.path),'walBytes':size(Path(str(self.path)+'-wal'))}
-        s['diagnostics']['lowStorage']=[v['id'] for v in s['storage'] if v.get('availableBytes',0)<1024**3]
+        s['diagnostics']['lowStorage']=[v['id'] for v in s['storage'] if v.get('availableBytes',0)<(2 if v['id']=='internal' else 1)*1024**3]
+        s['diagnostics']['internalReserveBytes']=2147483648
         s['diagnostics']['storagePolicy']='No automatic deletion; failed writes reported in historyError.'
         if agent['status']=='ok':
             for name,key,unit in [('memory.vmstat','vmstat','kernel counters'),('cpu.loadavg','loadavg','runnable tasks'),('disk.counters','disk','sectors and counts')]:
@@ -357,7 +367,7 @@ class HostMonitor:
         from .read_models import query_host
         with self.history_lock:generation=self.history_generation
         with closing(sqlite3.connect(self.path.resolve().as_uri()+'?mode=ro',uri=True,timeout=2,factory=request_timing.Connection)) as db:
-            rows=query_host(db,time.time()-seconds,bucket)
+            until=time.time();rows=query_host(db,until-seconds,bucket,until=until)
         result={name:[] for name in names}
         for row in rows:
             stamp=datetime.fromtimestamp(row[0],timezone.utc).isoformat()

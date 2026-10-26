@@ -8,6 +8,7 @@ from collections import OrderedDict
 from collections import deque
 from datetime import datetime, timezone, timedelta
 from . import request_timing
+from .metric_math import observation_coverage
 from . import core, read_models
 from .query_cache import QueryCache
 
@@ -74,6 +75,7 @@ def _device_history_uncached(identifier,period='24h'):
         observed_duration+=item['observed_duration_seconds'];segment_count+=1;segments.append(item)
     with core.connect() as db:
         db.execute('BEGIN')
+        coverage=observation_coverage(db,'router_client_samples',start,end,mac)
         identity=db.execute('SELECT ts,payload FROM router_client_samples WHERE mac=? ORDER BY ts DESC,id DESC LIMIT 1',(mac,)).fetchone()
         if identity is None:raise LookupError('Device not found')
         first=db.execute('SELECT MIN(ts) FROM router_client_samples WHERE mac=?',(mac,)).fetchone()[0]
@@ -101,13 +103,13 @@ def _device_history_uncached(identifier,period='24h'):
     expected=math.ceil(PERIODS[period]/60)
     return {'device':identity,'period':{'key':period,'from':start.isoformat(),'to':end.isoformat(),'resolution_seconds':buckets.width},
             'source':SOURCE,'source_type':'router_gui_readonly','confidence':'reported','collected_at':latest['timestamp'] if latest else None,
-            'sample_coverage':{'sample_count':buckets.count,'expected_count':expected,'coverage_percent':min(100,buckets.count/expected*100)},
+            'sample_coverage':coverage,
             'measurement_semantics':{'presence':'estimated from reported states, not exact sessions','rssi_dbm':'AP-reported dBm','phy':'router RX/TX PHY in Mbit/s, not throughput','traffic':'unavailable'},
             'series':points,'stats':stats,'latest':latest,'sessions':list(segments),'session_count':segment_count,'sessions_truncated':segment_count>500,'identity_history':list(identities),'identity_history_truncated':identity_count>500,
             'presence':{'online_samples':online,'known_samples':known,'percent_of_known_samples':online/known*100 if known else None,
                         'observed_duration_seconds':observed_duration,'semantics':'estimated_contiguous_sample_spans_with_max_gap_180s; not exact association sessions'},
             'events':events[:1000],'events_truncated':len(events)>1000,
-            'quality':{'sample_count':buckets.count,'expected_count':expected,'coverage_percent':min(100,buckets.count/expected*100),'sample_gaps':gap_count,'aggregation':'bucket_mean_with_min_max_envelope'},
+            'quality':{**coverage,'sample_gaps':gap_count,'aggregation':'bucket_mean_with_min_max_envelope'},
             'capabilities':{'client_bytes':'unknown','client_traffic':'unsupported','client_rssi':'supported' if stats['rssi_dbm']['sample_count'] else 'unknown',
                             'phy_rate':'supported' if stats['link_rx_phy_mbps']['sample_count'] else 'unknown','client_probe':'not_configured','exact_sessions':'unsupported'}}
 
@@ -129,6 +131,7 @@ def _overview_history_uncached(period='24h'):
     buckets=Buckets(start,end,keys);probes=Buckets(start,end,('router_ms','internet_ms','router_online','internet_online'))
     with core.connect() as db:
         db.execute('BEGIN')
+        coverage=observation_coverage(db,'huawei_samples',start,end)
         for ts,point in read_models.overview_rows(db,start.isoformat(),end.isoformat()):
             buckets.add({'timestamp':ts,**point})
         for row in db.execute('SELECT * FROM samples WHERE ts>=? AND ts<=? ORDER BY ts,id',(start.isoformat(),end.isoformat())):
@@ -138,9 +141,9 @@ def _overview_history_uncached(period='24h'):
     return {'period':{'key':period,'from':start.isoformat(),'to':end.isoformat(),'resolution_seconds':buckets.width},'series':points,'stats':stats,
             'probes':probe_points,'probe_stats':probe_stats,'events':events[:1000],'events_truncated':len(events)>1000,
             'source':SOURCE,'source_type':'router_gui_readonly','confidence':'reported','collected_at':points[-1]['timestamp_end'] if points else None,
-            'sample_coverage':{'sample_count':buckets.count,'expected_count':math.ceil(PERIODS[period]/60),'coverage_percent':min(100,buckets.count/max(1,math.ceil(PERIODS[period]/60))*100)},
+            'sample_coverage':coverage,
             'measurement_semantics':{'wan':'raw router counters; width/reset not validated; no throughput or consumption derived','wifi':'arithmetic RSSI mean of stations reported in each sample'},
-            'quality':{'sample_count':buckets.count,'expected_count':math.ceil(PERIODS[period]/60),'coverage_percent':min(100,buckets.count/max(1,math.ceil(PERIODS[period]/60))*100),'aggregation':'bucket_mean_with_min_max_envelope'}}
+            'quality':{**coverage,'aggregation':'bucket_mean_with_min_max_envelope'}}
 
 
 # Memory-only cache; all original observations remain on the configured SQLite volume.
@@ -167,9 +170,10 @@ def overview_summary(period='24h'):
     span=PERIODS[period]
     bucket=max(60,math.ceil(span/96))
     with core.connect() as db:
+        db.execute('BEGIN')
+        coverage=observation_coverage(db,'huawei_samples',start,end)
         # Both coverage and underlying original records remain exact.
-        count=db.execute('SELECT COUNT(*) FROM huawei_samples WHERE ts>=? AND ts<=?',
-                         (start_iso,end_iso)).fetchone()[0]
+        count=coverage['sample_count']
         # At most one original reading per summary bucket, using ID index on the second pass.
         ids=[row[0] for row in db.execute(
             "SELECT MAX(id) FROM huawei_samples WHERE ts>=? AND ts<=? "
@@ -208,12 +212,12 @@ def overview_summary(period='24h'):
     expected=max(1,math.ceil(span/60))
     return {'period':{'key':period,'from':start_iso,'to':end_iso,'resolution_seconds':bucket},
             'series':series,'probes':probes,'events':events,
-            'quality':{'sample_count':count,'expected_count':expected,
-                       'coverage_percent':min(100,count/expected*100),
+            'quality':{**coverage,
                        'aggregation':'original_observations_sampled_for_preview'},
             'summary':{'sampled':True,'max_buckets':96,'raw_samples_retained':True,
                        'series_semantics':'one original stored observation per bucket',
                        'events_limited_to':3},
+            'measurement_semantics':{'wan':'raw counters; decreases are discontinuities, not throughput; width and multiple wraps unvalidated','wan_rate_available':False},
             'source':SOURCE,'collected_at':series[-1]['timestamp_end'] if series else None}
 
 def overview_history(period='24h',view='full'):

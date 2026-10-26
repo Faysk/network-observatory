@@ -18,6 +18,20 @@ class HostTests(unittest.TestCase):
             self.assertEqual(self.monitor.cpu(),(None,[None]))
         with patch('app.host_telemetry.read',return_value='cpu 20 0 20 160 0 0 0 0\ncpu0 20 0 20 160 0 0 0 0'):
             self.assertEqual(self.monitor.cpu(),(20.0,[20.0]))
+    def test_network_resets_are_directional_and_gaps_unknown(self):
+        self.monitor.previous_net=('wlan0',100,100,10)
+        raw='wlan0: 50 1 0 0 0 0 0 0 200 1 0 0 0 0 0 0'
+        with patch('app.host_telemetry.read',side_effect=lambda p:raw if str(p)=='/proc/net/dev' else 'up'),patch('app.host_telemetry.time.monotonic',return_value=20),patch('app.host_telemetry.platform.system',return_value='Fixture'):
+            result=self.monitor.network();self.assertIsNone(result['rxMbps']);self.assertEqual(result['txMbps'],0.0001)
+        self.monitor.previous_net=('wlan0',0,0,-1000)
+        with patch('app.host_telemetry.read',return_value=raw),patch('app.host_telemetry.time.monotonic',return_value=20),patch('app.host_telemetry.platform.system',return_value='Fixture'):
+            result=self.monitor.network();self.assertIsNone(result['rxMbps']);self.assertIsNone(result['txMbps'])
+    def test_nonfinite_sources_and_invalid_cpu_delta_are_unknown(self):
+        self.assertIsNone(host_telemetry.number('nan'));self.assertIsNone(host_telemetry.number('inf'))
+        self.monitor.previous_cpu={'cpu':(100,50)}
+        with patch('app.host_telemetry.read',return_value='cpu 100 0 0 40 0 0 0 0'):
+            self.assertIsNone(self.monitor.cpu()[0])
+
     def test_absent_sensors_are_null_not_zero(self):
         with patch('app.host_telemetry.read',return_value=None),patch('app.host_telemetry.shutil.which',return_value=None):
             self.assertIsNone(self.monitor.battery()['levelPercent'])
