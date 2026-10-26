@@ -50,11 +50,11 @@ search.addEventListener('input',applyFilters);
 document.querySelector('a[href="#routerObservability"]')?.addEventListener('click',()=>{document.getElementById('sidebar')?.classList.remove('open');});
 const time=v=>v?new Date(v).toLocaleString('pt-PT'):'Sem leitura';
 async function get(url){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000);try{const r=await fetch(url,{cache:'no-store',signal:controller.signal});if(!r.ok)throw Error();return await r.json();}finally{clearTimeout(timer);}}
-async function historyPage(source,output,button,after=0){
+async function historyPage(source,output,button,before=0){
  button.disabled=true;
  try{
-  const a=await get(`/api/router/observability/archive?source=${encodeURIComponent(source.id)}&limit=100&after=${after}`);
-  if(!after)output.replaceChildren(node('p',`Primeiras ${a.records.length} observações guardadas${a.has_more?' · carregue as páginas seguintes para continuar':''}.`));
+  const a=await get(`/api/router/observability/archive/recent?source=${encodeURIComponent(source.id)}&limit=50&before=${before}`);
+  if(!before)output.replaceChildren(node('p',`Últimas ${a.records.length} observações guardadas${a.has_more?' · existem leituras anteriores':''}.`));
   else button.remove();
   for(const item of a.records){
    const d=node('details',undefined,'observation-archive-entry');
@@ -66,7 +66,7 @@ async function historyPage(source,output,button,after=0){
    });
    output.append(d);
   }
-  if(a.has_more){const more=node('button','Carregar mais observações');more.type='button';more.addEventListener('click',()=>historyPage(source,output,more,a.next_after));output.append(more);}
+  if(a.has_more){const more=node('button','Carregar leituras anteriores');more.type='button';more.addEventListener('click',()=>historyPage(source,output,more,a.next_before));output.append(more);}
  }catch{output.append(node('p','Não foi possível consultar o arquivo. Pode tentar novamente.'));}
  finally{button.disabled=false;}
 }
