@@ -17,7 +17,7 @@ const full=(period)=>({
  counter_period:{from:new Date(now-86400000).toISOString(),to:stamp,resolution_seconds:240,sampled_preview:true,observed_increments:{wan_rx_bytes:{bytes:2**31,valid_pairs:2,excluded_transitions:1},wan_tx_bytes:{bytes:2,valid_pairs:2,excluded_transitions:0}}},
  events:[],quality:{coverage_percent:1,sample_count:1,expected_count:1440}
 });
-const status={huawei:{quality:'ok',collected_at:stamp,source:'fixture',metrics:{cpu_pct:0},
+const status={collector:{state:'auth_blocked'},huawei:{quality:'ok',collected_at:stamp,source:'fixture',metrics:{cpu_pct:0},
  wan_states:{wan0:{services:['Internet']}},interfaces:{wan0:{rx_bytes:0,tx_bytes:0}}},
  probe:{ts:stamp,router_online:1,router_ms:0,internet_online:1,internet_ms:null},retention_days:0};
 const counts={status:0,summary:0,full:{},inventory:0};
@@ -27,6 +27,11 @@ const send=(res,obj,code=200,delay=0)=>setTimeout(()=>{if(res.destroyed)return;l
 const server=http.createServer((req,res)=>{
  const url=new URL(req.url,'http://127.0.0.1'),pathname=url.pathname;
  if(pathname==='/api/status'){counts.status++;send(res,status,200,25);return;}
+ if(pathname==='/api/router/observability'){
+  send(res,{sources:[{id:'radio_settings',title:'Configuração Wi-Fi',quality:'ok',attempt_status:'ok',collected_at:stamp,age_seconds:0,data:[{interface:'wlan1',width_policy_code:3,power_pct:0,description:'<img src=x onerror=alert(1)>'}]},{id:'upnp',title:'Mapeamentos UPnP',quality:'ok',attempt_status:'ok',collected_at:stamp,age_seconds:0,data:[]},{id:'ipv6',title:'Estado WAN IPv6',quality:'unavailable',attempt_status:'unavailable',reason:'transport',data:null}],changes:[{id:1,source:'upnp',previous_at:stamp,observed_at:stamp,crosses_gap:true,detail:{before_count:1,after_count:0,changed_fields:['external_port'],added:0,removed:1}}],unsupported:{wifi_logs:'Exportação indisponível na conta verificada.'},width_policies:{3:'Auto. 20/40/80 MHz'},poll_seconds:300},200,20);return;
+ }
+ if(pathname==='/api/router/observability/change'){send(res,{before:[{external_port:1234}],after:[]});return;}
+ if(pathname==='/api/router/observability/archive'){send(res,{records:[{id:1,ts:stamp,status:'ok',data:[]}],has_more:false,next_after:1});return;}
  if(pathname==='/api/router/clients'){counts.inventory++;send(res,{clients:inventorySmoke?fixtureClients():[]},200,80);return;}
  if(pathname==='/api/v1/overview'){
   const period=url.searchParams.get('period')||'24h';

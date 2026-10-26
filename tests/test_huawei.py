@@ -98,7 +98,7 @@ class HuaweiTests(unittest.TestCase):
         adapter=h.HuaweiB7('192.168.1.1','test','test')
         pages={'/index.asp':fixture('index'),**{h.PATHS[k]:fixture(k) for k in h.PATHS}}
         def request(c,m,p,**kw):
-            if p==h.PATHS['system']:raise h.AuthenticationError('session_expired')
+            if p==h.PATHS['system']:raise h.AdapterError('schema_changed')
             return pages[p],[]
         with patch.object(adapter,'_request',side_effect=request):
             result=adapter._read_data(MagicMock())
@@ -203,12 +203,14 @@ class HuaweiTests(unittest.TestCase):
         pages={'/':'var productName = "HG8247B7";', '/index.asp':fixture('index'), **{h.PATHS[k]:fixture(k) for k in h.PATHS}}
         with patch.object(adapter,'_request',side_effect=lambda c,m,p,**kw:(pages[p],[])) as request:
             result=adapter.collect()
-            self.assertEqual(request.call_count,10)
+            from app.router_observability import SOURCES
+            initial_calls=10+len({v[0] for v in SOURCES.values()})
+            self.assertEqual(request.call_count,initial_calls)
             self.assertIs(adapter.collect(),result)
-            self.assertEqual(request.call_count,10)
+            self.assertEqual(request.call_count,initial_calls)
             clock[0]+=61
             adapter.collect()
-            self.assertEqual(request.call_count,19)
+            self.assertEqual(request.call_count,initial_calls+9)
             self.assertEqual(len({id(c.args[0]) for c in request.call_args_list}),1)
         adapter.close()
         with self.assertRaises(h.AdapterError):

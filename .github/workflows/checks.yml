@@ -34,6 +34,7 @@ jobs:
       - run: node tests/test_s7_ui.cjs
       - run: node tests/test_sheet_requests.cjs
       - run: node --check app/static/app.js
+      - run: node --check app/static/observability.js
       - run: node tests/browser_smoke.cjs
       - run: node --check app/static/devices.js
       - run: node tests/test_inventory.cjs

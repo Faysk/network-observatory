@@ -178,10 +178,10 @@ def reference_payload(pages,statuses):
     return result
 
 def source_check(pages,payload):
-    expected=reference_payload(pages,payload.get('sections',{}));actual={k:v for k,v in payload.items() if k!='collected_at'}
+    expected=reference_payload(pages,payload.get('sections',{}));actual={k:v for k,v in payload.items() if k not in ('collected_at','observability')}
     paths=differences(expected,actual)
     manifest=Counter(re.sub(r'\[\d+\]','[]',p) for p,_ in leaves(actual))
-    return {'checked_values':sum(manifest.values()),'field_paths':dict(sorted(manifest.items())),'mismatches':paths,'source_pages':sorted(pages)}
+    return {'checked_values':sum(manifest.values()),'field_paths':dict(sorted(manifest.items())),'mismatches':paths,'source_pages':sorted(pages),'scope':'baseline telemetry; observability parsers covered by synthetic contract tests, excluded from independent live reference'}
 
 def saved_check(payload):
     from . import core
