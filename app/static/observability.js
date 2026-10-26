@@ -2,7 +2,7 @@
 (()=>{'use strict';
 const page=document.querySelector('.page');if(!page)return;
 const node=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
-const panel=node('section',undefined,'observation-panel');panel.id='routerObservability';panel.setAttribute('aria-labelledby','observationTitle');
+const panel=node('section',undefined,'observation-panel');panel.id='routerObservability';panel.tabIndex=-1;panel.setAttribute('aria-labelledby','observationTitle');
 const title=node('h2','Configuração e diagnóstico');title.id='observationTitle';panel.append(title);
 panel.append(node('p','Leituras adicionais a cada 5 minutos. Alterações representam diferenças entre observações; o horário exato e a causa não são conhecidos.'));
 const collector=node('p','A consultar o estado do coletor…','observation-collector');collector.setAttribute('role','status');panel.append(collector);
@@ -23,7 +23,7 @@ const groups={wifi:['radio_settings','guest_limits','guest_network','wps','wifi_
 let payload=null,busy=false;
 Object.assign(labels,{conflicting_fields:'Campos divergentes entre linhas reportadas',reported_rows:'Linhas reportadas para este MAC'});
 group.addEventListener('change',()=>{if(payload)render(payload);});
-document.querySelector('a[href="#routerObservability"]')?.addEventListener('click',()=>{document.getElementById('sidebar')?.classList.remove('open');title.tabIndex=-1;title.focus({preventScroll:true});});
+document.querySelector('a[href="#routerObservability"]')?.addEventListener('click',()=>{document.getElementById('sidebar')?.classList.remove('open');});
 const time=v=>v?new Date(v).toLocaleString('pt-PT'):'Sem leitura';
 async function get(url){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000);try{const r=await fetch(url,{cache:'no-store',signal:controller.signal});if(!r.ok)throw Error();return await r.json();}finally{clearTimeout(timer);}}
 async function historyPage(source,output,button,after=0){

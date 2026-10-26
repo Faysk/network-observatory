@@ -190,10 +190,13 @@ def parse(source,raw):
     elif source=='client_modes':
         out=[{'work_mode_reported':enum(r[1]),'ip':private_ip(r[2]),'mac':mac(r[3])} for r in rows(raw,'stWifiWorkingMode',4,True) if mac(r[3])]
     elif source=='station_details':
-        if not re.search(r'function\s+stAssociatedDevice\s*\(',raw):raise ValueError('station_schema')
+        station_rows=rows(raw,'stAssociatedDevice',29)
+        # AJAX may supply literal rows while the constructor lives in the parent GUI.
+        # Empty results still require the declaration to distinguish empty data from a login/error page.
+        if not station_rows and not re.search(r'function\s+stAssociatedDevice\s*\(',raw):raise SchemaError('station_schema',constructor_calls=0)
         numeric={2:'uptime_seconds_reported',3:'rx_link_mbps',4:'tx_link_mbps',5:'rssi_dbm',6:'noise_dbm_reported',7:'snr_db_reported',8:'signal_quality_reported'}
         flags={10:'wmm',11:'power_save',12:'high_band',16:'supports_11k',17:'supports_11v',18:'dual_band',19:'beamforming',21:'twt_requester',22:'twt_responder',23:'bss_coloring',24:'ofdma',25:'mu_mimo',26:'supports_11w',27:'mimo',28:'supports_11r'}
-        for r in rows(raw,'stAssociatedDevice',29):
+        for r in station_rows:
             if not mac(r[1]):continue
             item={'interface':interface(r[0]),'mac':mac(r[1]),'ip':private_ip(r[13]),'description':label(r[14]),'work_mode_reported':enum(r[9]),'resource_unit_reported':enum(r[20])}
             bounds={'rx_link_mbps':(0,100000),'tx_link_mbps':(0,100000),'rssi_dbm':(-200,0),'noise_dbm_reported':(-200,0),'snr_db_reported':(0,200),'signal_quality_reported':(0,100),'uptime_seconds_reported':(0,10**11)}
@@ -294,8 +297,8 @@ def collect(adapter,conn):
         except (OSError,http.client.HTTPException):
             conn.close();result[source]={'collected_at':stamp,'status':'unavailable','reason':'transport','data':None}
         except Exception as exc:
-            if isinstance(exc,SchemaError):
-                print('Formato de fonte adicional:',json.dumps({'source':source,'code':exc.code,**exc.context},sort_keys=True),flush=True)
+            diagnostic={'source':source,'code':exc.code,**exc.context} if isinstance(exc,SchemaError) else {'source':source,'code':type(exc).__name__}
+            print('Formato de fonte adicional:',json.dumps(diagnostic,sort_keys=True),flush=True)
             reason='http' if exc.args==('router_http_error',) else 'schema'
             result[source]={'collected_at':stamp,'status':'unavailable','reason':reason,'data':None}
     adapter.next_observation_attempt=now+300

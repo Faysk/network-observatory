@@ -12,6 +12,7 @@
   const d=frame.contentDocument,w=frame.contentWindow;
   await wait(()=>w.FNO?.state?.resources?.status?.phase==='ready','first status');
   await wait(()=>d.querySelectorAll('.observation-source').length===3,'additional source panel');
+  d.querySelector('a[href="#routerObservability"]').click();await wait(()=>w.location.hash==='#routerObservability','source navigation anchor');
   assert(d.querySelector('.observation-collector').textContent.includes('Autenticação bloqueada'),'collector authentication state missing');
   const source=d.querySelector('.observation-source');source.open=true;
   assert(source.textContent.includes('Auto. 20/40/80 MHz'),'configured width was not decoded');

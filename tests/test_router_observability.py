@@ -66,6 +66,8 @@ class ObservationTests(unittest.TestCase):
         sentinel=examples['station_details'].replace('"-50"','"4294967295"').replace('"80"','"4294967295"')
         station=o.parse('station_details',sentinel)[0]
         self.assertIsNone(station['rssi_dbm']);self.assertIsNone(station['signal_quality_reported']);self.assertEqual(station['rx_link_mbps'],1000)
+        bare=examples['station_details'].split(';',1)[1]
+        self.assertEqual(o.parse('station_details',bare),o.parse('station_details',examples['station_details']))
 
     def test_empty_upnp_is_distinct_from_failed_schema(self):
         self.assertEqual(o.parse('upnp',js('stUpnpPortMapping',0,0,'',0,0,'','0.0.0.0','')),[])
