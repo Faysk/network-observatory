@@ -16,10 +16,39 @@
     if(/eth|lanethernet|\blan[1-4]\b/i.test(ports))return 'wired';
     return 'unknown';
   }
+  // Exact observation match is required: never join a current radio channel
+  // to a device from another capture. wlan5 is NOT synonymous with 5 GHz.
+  function wifiContext(c,huawei,now=Date.now()){
+    const unknown={label:'Wi-Fi · banda não identificada',band:null,interfaces:[],title:'Banda não identificada nesta leitura; número WLAN não é frequência.'};
+    if(network(c)!=='wifi')return {label:'Não é Wi-Fi',band:null,interfaces:[],title:'Ligação Wi-Fi não reportada'};
+    const stationList=Array.isArray(c?.stations)?c.stations:[];
+    const names=[...new Set(stationList.map(s=>s?.interface).filter(x=>/^wlan(?:[1-9]|1[0-6])$/.test(x)))];
+    if(!names.length)return unknown;
+    const stamp=Date.parse(huawei?.collected_at),seen=Date.parse(c?.last_seen);
+    const matched=presence(c)==='online'&&huawei?.quality==='ok'&&Number.isFinite(stamp)&&Number.isFinite(seen)&&
+      Math.abs(stamp-seen)<=1000&&now-stamp<=180000&&now-stamp>=-5000;
+    const list=names.map(wlan=>{
+      const meta=matched?huawei.wifi?.[wlan]:null;
+      const band=meta?.band==='2.4GHz'?'2,4 GHz':meta?.band==='5GHz'?'5 GHz':null;
+      const channel=Number.isInteger(meta?.channel)&&meta.channel>=1?meta.channel:null;
+      return {interface:wlan,band,channel};
+    });
+    const bands=[...new Set(list.map(x=>x.band).filter(Boolean))];
+    const band=bands.length===1&&list.every(x=>x.band===bands[0])?bands[0]:null;
+    const details=list.map(x=>x.interface+(x.band?' · '+x.band:' · banda não identificada')+(x.channel?' · canal '+x.channel:'')).join(' / ');
+    return {label:band?'Wi-Fi · '+band:names.length>1?'Wi-Fi · múltiplas interfaces':unknown.label,
+      band,interfaces:list,title:(matched?'Leitura atual: ':'Interface observada, sem correspondência temporal: ')+details+'. SSID e antena física não confirmados.'};
+  }
   // Speed belongs to the router's physical port, not to a bandwidth test.
   function connection(c,huawei,now=Date.now()){
     const kind=network(c);
-    if(kind!=='wired')return {label:presence(c)==='online'&&Number.isFinite(c?.station?.rssi_dbm)?c.station.rssi_dbm+' dBm':'Sem dados',title:'Sinal Wi-Fi reportado pelo router'};
+    if(kind==='wifi'){
+      const context=wifiContext(c,huawei,now);
+      const station=Array.isArray(c?.stations)?c.stations[0]:null;
+      const signal=presence(c)==='online'&&Number.isFinite(station?.rssi_dbm)?station.rssi_dbm+' dBm':'RSSI indisponível';
+      return {label:(context.band||'Banda desconhecida')+' · '+signal,title:context.title+' RSSI reportado pelo AP, não mede tráfego Internet.'};
+    }
+    if(kind!=='wired')return {label:'Sem dados',title:'Ligação não determinada'};
     const missing={label:'Velocidade indisponível',title:'Sem velocidade Ethernet atual e inequívoca para este aparelho'};
     const ts=Date.parse(huawei?.collected_at),seen=Date.parse(c?.last_seen);
     if(presence(c)!=='online'||huawei?.quality!=='ok'||!Number.isFinite(ts)||!Number.isFinite(seen)||now-ts>180000||now-ts< -5000||now-seen>180000||now-seen< -5000||Math.abs(ts-seen)>180000)return missing;
@@ -124,7 +153,7 @@
     }
     return totals;
   }
-  const api={STATES,presence,network,connection,prepare,filter,compare,select,counts};
+  const api={STATES,presence,network,connection,wifiContext,prepare,filter,compare,select,counts};
   if(typeof module!=='undefined'&&module.exports)module.exports=api;
   else root.FNOInventory=api;
 })(typeof window!=='undefined'?window:{});

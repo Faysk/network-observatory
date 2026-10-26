@@ -254,7 +254,7 @@ def put_huawei_sample(data, historical=False):
             observation={**client,'stations':[s for s in data.get('stations',[]) if s.get('mac')==client['mac']]}
             observation_id=db.execute('INSERT INTO router_client_samples(sample_id,ts,mac,payload) VALUES(?,?,?,?)',
                        (sample_id,data['collected_at'],client['mac'],json.dumps(observation,allow_nan=False))).lastrowid
-            safe_project(db,project_client,observation_id,data['collected_at'],client['mac'],observation)
+            safe_project(db,project_client,observation_id,data['collected_at'],client['mac'],observation,data.get('wifi',{}))
             if previous and not historical:
                 old=json.loads(previous['payload']).get('reported_status','Unknown')
                 gap=(datetime.fromisoformat(data['collected_at'])-datetime.fromisoformat(previous['ts'])).total_seconds()

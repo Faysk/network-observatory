@@ -64,5 +64,24 @@ assert.equal(inv.connection(wired,{...h,quality:'stale'},now).label,'Velocidade 
 assert.equal(inv.connection(wired,{...h,collected_at:new Date(now-181000).toISOString()},now).label,'Velocidade indisponível');
 h.interfaces.lan4.link_up=false;assert.equal(inv.connection(wired,h,now).label,'Velocidade indisponível');
 h.interfaces.lan4.link_up=true;h.interfaces.lan4.speed_mbps=null;assert.equal(inv.connection(wired,h,now).label,'Velocidade indisponível');
-assert.equal(inv.connection(inv.prepare({...sample(1),quality:'ok',reported_status:'Online'}),h,now).label,'-50 dBm');
+assert.equal(inv.connection(inv.prepare({...sample(1),quality:'ok',reported_status:'Online'}),h,now).label,'Banda desconhecida · -50 dBm');
 console.log('Ethernet negotiated link tests passed');
+
+const wifiClient=inv.prepare({...sample(1),quality:'ok',reported_status:'Online',
+  last_seen:at,stations:[{interface:'wlan5',rssi_dbm:-62}],ports:['WIFI:SSID5']});
+const radios={quality:'ok',collected_at:at,wifi:{wlan5:{band:'5GHz',channel:100},wlan1:{band:'2.4GHz',channel:6}}};
+assert.equal(inv.wifiContext(wifiClient,radios,now).band,'5 GHz');
+assert.deepEqual(inv.wifiContext(wifiClient,radios,now).interfaces,[{interface:'wlan5',band:'5 GHz',channel:100}]);
+assert.equal(inv.connection(wifiClient,radios,now).label,'5 GHz · -62 dBm');
+assert.equal(inv.wifiContext({...wifiClient,last_seen:new Date(now-61000).toISOString()},radios,now).band,null);
+assert.equal(inv.wifiContext({...wifiClient,quality:'stale'},radios,now).band,null);
+assert.equal(inv.wifiContext(wifiClient,{...radios,quality:'stale'},now).band,null);
+assert.equal(inv.wifiContext(wifiClient,{...radios,collected_at:new Date(now-181000).toISOString()},now).band,null);
+assert.equal(inv.wifiContext(wifiClient,{...radios,wifi:{}},now).band,null);
+assert.equal(inv.wifiContext(wifiClient,{...radios,wifi:{wlan5:{channel:100}}},now).band,null);
+const multiple={...wifiClient,stations:[{interface:'wlan1',rssi_dbm:-61},{interface:'wlan5',rssi_dbm:-62}]};
+assert.equal(inv.wifiContext(multiple,radios,now).band,null);
+assert.equal(inv.wifiContext(multiple,radios,now).interfaces.length,2);
+assert.equal(inv.wifiContext(wifiClient,{...radios,wifi:{wlan5:{band:'6GHz',channel:37}}},now).band,null);
+assert.equal(inv.wifiContext(wifiClient,radios,now).title.includes('canal 100'),true);
+console.log('Same-snapshot Wi-Fi interface/band, multiple, unknown and stale checks passed.');
