@@ -372,7 +372,7 @@ def archive(db,source,after=0,limit=100):
 # numeric summaries, and never returns private row bodies or per-device identity.
 TREND_MAX_POINTS=400
 TREND_METRICS={
-    'station_details':(('record_count','Estações reportadas','estacoes'),
+    'station_details':(('record_count','Estações reportadas','registos'),
                        ('rssi_mean_dbm','RSSI médio','dBm'),
                        ('snr_mean_db','SNR médio','dB')),
     'upnp':(('record_count','Mapeamentos UPnP','registos'),
