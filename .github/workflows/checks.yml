@@ -15,6 +15,22 @@ jobs:
           python-version: '3.12'
       - run: python -m unittest discover -s tests -v
       - run: python tools/bench_histories.py --samples-per-day 30
+      - name: Individual backend performance and contracts (synthetic)
+        run: python tools/performance_matrix.py --environment-label github-actions-synthetic --build-label "${{ github.sha }}" --output "${{ runner.temp }}/performance-backend.json"
+      - name: HTTP performance, contracts and full exports (synthetic)
+        run: python tools/performance_matrix.py --transport http --include-exports --environment-label github-actions-synthetic --build-label "${{ github.sha }}" --output "${{ runner.temp }}/performance-http.json"
+      - name: Preserve sanitized performance reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: synthetic-performance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/performance-backend.json
+            ${{ runner.temp }}/performance-backend.md
+            ${{ runner.temp }}/performance-http.json
+            ${{ runner.temp }}/performance-http.md
+          retention-days: 14
+          if-no-files-found: warn
       - run: node tests/test_s7_ui.cjs
       - run: node tests/test_sheet_requests.cjs
       - run: node --check app/static/app.js

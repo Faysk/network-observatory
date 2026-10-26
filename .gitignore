@@ -65,3 +65,6 @@ Thumbs.db
 *.mov
 *.wav
 *.mp3
+
+# Benchmark outputs can contain private operational timings; publish synthetic CI artifacts only
+/performance-reports/
