@@ -612,10 +612,13 @@ async function loadOperations(){
   const result=await get('/api/router/operations');
   renderOperations(result);
  }catch{
-  if(!operationsLoaded){
-    operationsStatus.textContent='Telemetria indisponível';
-    operationsStatus.className='observation-badge aged';
-    operationsAlerts.replaceChildren(node('p','Não foi possível consultar a saúde do Observatory. Os indicadores não devem ser interpretados como normais.'));
+  operationsStatus.textContent=operationsLoaded?'Última leitura · sem atualização':'Telemetria indisponível';
+  operationsStatus.className='observation-badge aged';
+  const warning=node('p','Não foi possível atualizar a saúde do Observatory. As métricas anteriores, se exibidas, podem estar desatualizadas.','observation-operations-warning');
+  if(operationsLoaded){
+    operationsAlerts.prepend(warning);
+  }else{
+    operationsAlerts.replaceChildren(warning);
   }
  }
 }
