@@ -21,6 +21,14 @@
   assert([...d.querySelectorAll('.observation-section')].filter(x=>!x.hidden).length===1,'group navigation did not filter sources');
   d.querySelector('[data-observation-category="all"]').click();
   assert([...d.querySelectorAll('.observation-section')].filter(x=>!x.hidden).length>=2,'all sources not restored');
+  await wait(()=>d.querySelector('.observation-operations-metrics .observation-metric'),'operational health cards');
+  assert(d.querySelectorAll('.observation-operations-metrics .observation-metric').length===6,
+         'six operational health indicators missing');
+  assert(d.querySelector('.observation-operations-alerts').textContent.includes('Alteração observada'),
+         'passive observed change should be rendered');
+  const operationsHistory=d.querySelector('.observation-operations-trend');
+  operationsHistory.open=true;
+  await wait(()=>operationsHistory.querySelector('.observation-trend-svg'),'historical system health chart');
   assert(d.querySelectorAll('.observation-kpi').length===4,'four overview metrics missing');
   assert(d.querySelectorAll('.observation-section').length>=2,'source thematic grouping missing');
   const search=d.querySelector('.observation-source-search');

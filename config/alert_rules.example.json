@@ -1,0 +1,18 @@
+{
+  "enabled": true,
+  "collector_stale_minutes": 15,
+  "host_stale_minutes": 5,
+  "database_free_gib_warning": 2,
+  "database_free_gib_critical": 1,
+  "process_rss_mb_warning": 250,
+  "sqlite_growth_mb_day_warning": 250,
+  "change_window_minutes": 90,
+  "change_sources": [
+    "firewall_v4",
+    "firewall_v6",
+    "wan_acl",
+    "mac_policy",
+    "wps",
+    "file_services"
+  ]
+}

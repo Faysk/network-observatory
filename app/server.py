@@ -180,6 +180,9 @@ class Handler(BaseHTTPRequestHandler):
                 try:return self.respond(200,device_history(parts[3],period))
                 except LookupError:return self.error_json(404,'Device not found')
             if path.path == "/api/status": return self.respond(200, core.get_status())
+            if path.path == '/api/router/operations':
+                from .operations import read as operations_read
+                return self.respond(200,operations_read())
             if path.path == '/api/router/observability':
                 from .router_observability import read
                 hours=float(parse_qs(path.query).get('hours',[24])[0])
