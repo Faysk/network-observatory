@@ -48,7 +48,7 @@
     const types=Array.isArray(c?.device_types)?c.device_types:[];
     if(category==='game_console' && types.some(x=>typeof x==='string'&&/^PS5$/i.test(x.trim())))
       return 'PlayStation 5';
-    if(category==='game_console'&&/^nintendo/i.test(c?.identity?.oui_vendor||''))return 'Console Nintendo (provável)';
+    if(category==='game_console'&&/^nintendo/i.test(c?.identity?.oui_vendor||''))return 'Console Nintendo';
     if(category==='android_device')return 'Equipamento Android';
     if(category==='computer')return 'Computador';
     const generic={
