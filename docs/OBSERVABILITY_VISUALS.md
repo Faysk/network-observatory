@@ -80,3 +80,81 @@ A homologação automatizada em navegador usa fixtures artificiais;
 **não representa teste numa conta Huawei real nem no hardware S7**.
 Para instalar no S7, é necessário procedimento de backup e validação
 separados. Os dados anteriores no SQLite não precisam de migração.
+
+
+## Nova camada: navegação e tendências verificáveis (PR de acabamento)
+
+A vista abre com seis atalhos (panorama + cinco domínios), cada um exibindo a
+quantidade **atual / total** de fontes desse domínio. O seletor de grupo, a
+pesquisa e os chips `Todas`, `Com alterações` e `Sem leitura atual`
+**ocultam** cartões em vez de destruí-los, preservando gráficos e arquivos
+abertos durante uma pesquisa. O filtro de mudanças baseia-se nas diferenças
+recebidas na prévia de até 500 entradas; não deve ser descrito como consulta
+exhaustiva quando `changes_truncated=true`.
+
+### Gráfico histórico por fonte
+
+`GET /api/router/observability/trend?source=station_details&hours=24&limit=400`
+
+- Fonte obrigatoriamente conhecida (allowlist de 28). Janela: 0–366 dias.
+- Consulta SQLite indexada por fonte/tempo, limitada às **400 observações
+  cronologicamente mais recentes** do intervalo. Se existirem mais registos,
+  retorna `truncated=true`, datas efetivamente representadas e aviso no gráfico.
+- Cada ponto contém somente carimbo de data/hora, estado e resumo numérico.
+  **Não** retorna MAC, IP, SSID, nomes de clientes ou o corpo bruto das
+  configurações; o arquivo original permanece no banco.
+- Qualquer fonte pode representar **quantidade de linhas reportadas**.
+  A quantidade não é uma contagem de dispositivos físicos nem de serviços
+  acessíveis. Para estações, expõe também a média de RSSI e de SNR das
+  estações reportadas; para UPnP/WPS/rádios/serviços, o número de linhas
+  explicitamente ativadas; para inventário, o número de identidades
+  com estado `Online` reportado.
+- O gráfico é gerado **sob demanda** em SVG, sem dependências externas;
+  indisponibilidade e valores `null` quebram o traçado. Lacunas com mais
+  de 15 minutos entre observações também interrompem a linha. Não há
+  interpolação, preenchimento sintético nem previsão.
+- Os pontos são guardados no SQLite já existente; a API não gera qualquer
+  novo dado de recolha.
+
+### Arquivo recente
+
+`GET /api/router/observability/archive/recent?source=upnp&limit=50&before=0`
+
+- Começa pelo instante mais recente, com paginação keyset
+  por `(ts,id)`. Lida corretamente com inserções históricas fora de ordem.
+- Não substitui a API de arquivo ascendente original nem altera exportações.
+- O frontend só constrói a tabela HTML de cada leitura arquivada **quando
+  essa leitura é aberta**; não há 50 tabelas grandes criadas de uma vez.
+- Respostas de arquivo continuam contendo informações privadas da rede.
+  Mantenha a API protegida por isolamento local ou autenticação e TLS
+  de um gateway confiável, como descrito em `SECURITY.md`.
+
+### Economia de recursos no S7
+
+- Nenhum gráfico histórico é carregado na inicialização da página; botão
+  dedicado consulta **uma fonte por vez**.
+- Detalhes completos das 28 fontes são construídos apenas quando o
+  respetivo cartão é aberto. A pesquisa e os filtros evitam reconstruir
+  os outros cartões e preservam histórico já carregado.
+- Mudanças de período feitas durante uma consulta são reexecutadas após
+  a consulta pendente, evitando mostrar indefinidamente uma janela antiga.
+- Não há alterações no intervalo do coletor Huawei, credenciais, escrita
+  do SQLite, retenção, GPIO, root ou firmware do router.
+- Dados brutos previamente arquivados continuam intactos: não é necessária
+  migração do banco para esta melhoria de apresentação.
+
+### Testes sintéticos adicionais
+
+```bash
+python -m unittest tests.test_router_observability -v
+python -m unittest tests.test_http -v
+node tests/test_observability_view.cjs
+node tests/browser_smoke.cjs
+```
+
+O teste do navegador usa somente leituras fabricadas de documentação
+(`example`, rede de teste `192.0.2.0/24`) e verifica navegação entre
+domínios, gráfico com lacunas, arquivo recente, pesquisa preservando
+estado, leitura `0`, escaping e largura de 320 px.
+
+**Nenhuma alteração foi feita diretamente ao S7 nem ao Huawei pela PR.**
