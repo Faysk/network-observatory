@@ -30,3 +30,6 @@ body[data-initial-loading="true"] .metric-value strong{color:transparent;display
 body.motion-paused .resource-block::after{animation:none!important}
 
 .telemetry-mini>.block-load-status{bottom:2px;font-size:9px}.telemetry-mini{padding-bottom:22px}
+
+/* Preserve two-decimal coverage within the existing rings. */
+.hero-score .ring-label strong{font-size:27px}.signal-main .quality-dial strong{font-size:23px}

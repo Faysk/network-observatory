@@ -26,7 +26,7 @@
 | Bateria | Capacidade %, temp/10 °C, voltage_now/1000 mV | Corrente Samsung mantém valor/unidade brutos sem inferir sinal/escala. Sensores não disponíveis não são simulados. |
 | Load / GPU / devfreq / térmicos | Load 1/5/15 min é número de tarefas; drivers ficam brutos | Não converte load em %, GPU em MHz ou zona térmica desconhecida em temperatura CPU. |
 | Disco / processo / PSI | Índices de diskstats e contadores de I/O; status em KiB/contagens | Não atribui I/O do kernel ao SQLite. PSI e campos não interpretados mantêm metadados de unidade/fonte. |
-| API / coleta / commit | p95 pelo nearest-rank `ceil(.95*n)-1` | Tempos de API Router são do servidor e excluem /api/host; não incluem rede. Gravação do hardware é transação anterior, identificada como tal. |
+| API / coleta / commit | p95 pelo nearest-rank `ceil(.95*n)-1` | Tempos de API Router são do servidor, incluem a escrita da resposta e excluem /api/host; não medem o tempo total até o navegador. Gravação do hardware é transação anterior, identificada como tal. |
 | Precisão de inteiros | JSON bruto preservado no banco; inteiros além de 2^53−1 chegam ao JS como strings decimais exatas | Strings JSON e números fracionários permanecem intactos. Valores escalados/arredondados não devem ser tratados como contadores exatos. |
 
 ## Projeção do hardware v2

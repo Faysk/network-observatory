@@ -216,11 +216,11 @@ function renderHome(){
  $('.hero-main p').textContent=probeCurrent?`Gateway: ${probe.router_online==null?'sem dados':probe.router_online?'responde':'sem resposta TCP'} · exterior: ${probe.internet_online==null?'sem dados':probe.internet_online?'responde':'sem resposta TCP'}.`:'Sem sondas TCP recentes para avaliar a conectividade.';
  const coverage=o?.quality?.coverage_percent;
  $('.signal-main p').textContent='Percentual da janela com uma coleta gravada há no máximo 3 minutos. Não é disponibilidade da Internet.';
- $('[data-metric="score"]').textContent=fmt(coverage,1);$('.quality-dial strong').textContent=fmt(coverage,1);
+ $('[data-metric="score"]').textContent=fmt(coverage,2);$('.quality-dial strong').textContent=fmt(coverage,2);
  $('.ring-fill').style.strokeDashoffset=String(2*Math.PI*49*(1-(coverage||0)/100));$('.dial-value').style.strokeDashoffset=String(2*Math.PI*37*(1-(coverage||0)/100));
  $('.score-copy>strong').textContent=`${fmt(o?.quality?.sample_count,0)} coletas`;
  $('.score-copy small').textContent='Leitura recente: até 3 min · intervalo médio '+fmt(o?.quality?.observed_interval_mean_seconds,1)+' s';
- $('.hero-score .score-ring').setAttribute('aria-label',`Cobertura da recolha: ${fmt(coverage)} por cento`);
+ $('.hero-score .score-ring').setAttribute('aria-label',`Cobertura temporal da recolha: ${fmt(coverage,2)} por cento`);
  let wan=current?Object.entries(h.wan_states||{}).find(([,v])=>v.services?.includes('Internet'))?.[0]:null;
  const counters=wan?h.interfaces?.[wan]:null;
  $('[data-metric="down"]').textContent=fmt(counters?.rx_bytes==null?null:counters.rx_bytes/2**30,2);
