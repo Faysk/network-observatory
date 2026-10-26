@@ -29,16 +29,16 @@
   function suggestedName(c,category,connection){
     const types=Array.isArray(c?.device_types)?c.device_types:[];
     if(category==='game_console' && types.some(x=>typeof x==='string'&&/^PS5$/i.test(x.trim())))
-      return 'PlayStation 5 provável';
-    if(category==='android_device')return 'Equipamento Android provável';
-    if(category==='computer')return 'Computador provável';
+      return 'PlayStation 5';
+    if(category==='android_device')return 'Equipamento Android';
+    if(category==='computer')return 'Computador';
     const generic={
-      smartphone:'Smartphone provável',tablet:'Tablet provável',
-      laptop:'Notebook provável',desktop:'Computador provável',
-      game_console:'Console provável',robot_vacuum:'Aspirador robô provável',
-      smart_tv:'TV provável',streaming_box:'Reprodutor multimédia provável',
-      printer:'Impressora provável',camera:'Câmara provável',
-      network_device:'Equipamento de rede provável',iot:'Dispositivo IoT provável'
+      smartphone:'Smartphone',tablet:'Tablet',
+      laptop:'Notebook',desktop:'Computador',
+      game_console:'Console',robot_vacuum:'Aspirador robô',
+      smart_tv:'TV',streaming_box:'Reprodutor multimédia',
+      printer:'Impressora',camera:'Câmara',
+      network_device:'Equipamento de rede',iot:'Dispositivo IoT'
     };
     return generic[category] || (connection==='wifi'?'Dispositivo Wi-Fi não identificado':
       connection==='wired'?'Dispositivo Ethernet não identificado':'Dispositivo não identificado');
