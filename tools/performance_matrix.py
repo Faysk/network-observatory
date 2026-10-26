@@ -385,6 +385,12 @@ def main(argv=None):
     p.add_argument('--fail-budgets', action='store_true')
     p.add_argument('--case', action='append', dest='case_patterns', help='Select individual case IDs or glob patterns; repeatable')
     args = p.parse_args(argv)
+    if args.fail_regressions and not args.baseline:
+        p.error('--fail-regressions requires --baseline; no silent disabled gate')
+    if args.fail_budgets and not args.budgets:
+        p.error('--fail-budgets requires --budgets; no silent disabled gate')
+    if args.include_exports and args.transport!='http':
+        p.error('Full exports are HTTP cases; select --transport http explicitly')
     if not (1 <= args.days <= 366 and 1 <= args.samples_per_day <= 1440 and 1 <= args.devices <= 100 and 0 <= args.payload_kib <= 128):
         p.error('Invalid bounded fixture dimensions')
     if not (1 <= args.trials <= 100 and 1 <= args.concurrent <= 4 and 1 <= args.max_response_mib <= 128 and 0 < args.timeout <= 120):
@@ -468,6 +474,11 @@ def main(argv=None):
             cases=[case for case in cases if any(fnmatch.fnmatchcase(case.id,pattern) for pattern in args.case_patterns)]
             if not cases:
                 p.error('No cases matched the explicit selection')
+        groups={}
+        for case in cases:
+            group='/'.join(case.id.split('/')[:2])
+            groups[group]=groups.get(group,0)+1
+        report['coverage']={'individual_queries':len(cases),'groups':groups}
         for index, case in enumerate(cases, 1):
             report['results'] += run_case(case, args.trials, args.concurrent, reset)
             print(f'{index}/{len(cases)} {case.id}', flush=True)

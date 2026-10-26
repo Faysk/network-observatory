@@ -49,9 +49,9 @@ class MatrixTests(unittest.TestCase):
             for transport in ('backend','http'):
                 output=Path(folder)/(transport+'.json')
                 with contextlib.redirect_stdout(io.StringIO()):
-                    code=matrix.main(['--transport',transport,'--days','1','--samples-per-day','2','--devices','2',
-                                      '--payload-kib','0','--trials','1','--periods','1h','7d',
-                                      '--include-exports','--output',str(output)])
+                    args=['--transport',transport,'--days','1','--samples-per-day','2','--devices','2',
+                          '--payload-kib','0','--trials','1','--periods','1h','7d','--output',str(output)]
+                    code=matrix.main(args+(['--include-exports'] if transport=='http' else []))
                 self.assertEqual(code,0)
                 data=json.loads(output.read_text(encoding='utf-8'))
                 self.assertTrue(all(row['functional'] for row in data['results']))
@@ -72,3 +72,22 @@ class MatrixTests(unittest.TestCase):
             self.assertFalse(list(Path(folder).iterdir()))
         error=urllib.error.HTTPError('http://private/identifier',500,'secret response',{},None)
         self.assertEqual(matrix.error_description(error),'HTTP 500')
+
+    def test_cli_performance_gates_fail_while_functional_checks_stay_green(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            args=['--case','s7/history/cpu/7d','--days','1','--samples-per-day','2','--devices','1',
+                  '--payload-kib','0','--trials','1']
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(matrix.main(args+['--output',str(root/'v1.json')]),0)
+                baseline=json.loads((root/'v1.json').read_text(encoding='utf-8'))
+                for row in baseline['results']:
+                    row['median_ms']=0
+                (root/'v1.json').write_text(json.dumps(baseline),encoding='utf-8')
+                self.assertEqual(matrix.main(args+['--baseline',str(root/'v1.json'),'--noise-floor-ms','0',
+                                                   '--regression-percent','0','--fail-regressions','--output',str(root/'v2.json')]),1)
+                (root/'budget.json').write_text('{"rules":[{"pattern":"*","median_ms":0}]}',encoding='utf-8')
+                self.assertEqual(matrix.main(args+['--budgets',str(root/'budget.json'),'--fail-budgets',
+                                                   '--output',str(root/'v3.json')]),1)
+            self.assertTrue(all(row['functional'] for row in json.loads((root/'v2.json').read_text())['results']))
+            self.assertTrue(json.loads((root/'v3.json').read_text())['budgets']['violations'])
