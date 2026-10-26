@@ -340,7 +340,7 @@ function renderSources(data){
      const trendButton=node('button','Ver gráfico histórico');trendButton.type='button';
      const trendSlot=node('div',undefined,'observation-trend');trendSlot.hidden=true;
      trendButton.addEventListener('click',()=>sourceTrend(source,trendButton,trendSlot));
-     actions.prepend(trendButton);content.append(actions,trendSlot,output);
+     actions.append(trendButton,history);content.append(actions,trendSlot,output);
      card.append(content);grid.append(card);
    }
    sectionBox.append(grid);cards.append(sectionBox);
