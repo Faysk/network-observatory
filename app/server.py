@@ -1,5 +1,9 @@
 """LAN-first dashboard HTTP API. No root, no third-party Python dependencies."""
 import argparse
+import gzip
+import hashlib
+from functools import lru_cache
+from email.utils import formatdate, parsedate_to_datetime
 import csv
 import io
 import json
@@ -14,6 +18,27 @@ from . import core
 
 STATIC = Path(__file__).resolve().parent / "static"
 VALT = STATIC.parent.parent / "sites" / "valt"
+
+# Disposable in-memory cache for public code only. No API or Vault files.
+@lru_cache(maxsize=16)
+def _code_asset(path, mtime_ns, size):
+    raw=Path(path).read_bytes()
+    etag='"'+hashlib.sha256(raw).hexdigest()+'"'
+    compressed=gzip.compress(raw,compresslevel=5,mtime=0) if len(raw)>=1024 and Path(path).suffix in ('.js','.css','.svg') else None
+    if compressed is not None and len(compressed)>=len(raw)*0.90:compressed=None
+    return raw,compressed,etag
+
+def _accepts_gzip(value):
+    for token in (value or '').lower().split(','):
+        name,_,params=token.strip().partition(';')
+        if name!='gzip':continue
+        for part in params.split(';'):
+            if part.strip().startswith('q='):
+                try:return float(part.strip()[2:])>0
+                except ValueError:return False
+        return True
+    return False
+
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -31,7 +56,43 @@ class Handler(BaseHTTPRequestHandler):
         style_policy = " 'unsafe-inline'" if urlsplit(self.path).path.startswith("/s7/") else ""
         self.send_header("Content-Security-Policy", "default-src 'self' data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; frame-src 'self' data: blob:; object-src 'self' data: blob:; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'" if urlsplit(self.path).path.startswith("/valt/") else "default-src 'self'; img-src 'self' data:; style-src 'self'" + style_policy + "; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
         self.end_headers()
-        self.wfile.write(body)
+        if not getattr(self,'_head_only',False):self.wfile.write(body)
+
+    def static_code(self, target, mime):
+        stat=target.stat()
+        raw,packed,raw_tag=_code_asset(str(target),stat.st_mtime_ns,stat.st_size)
+        use_gzip=packed is not None and _accepts_gzip(self.headers.get('Accept-Encoding'))
+        # Strong ETags are representation-specific: gzip bytes != identity bytes.
+        etag=raw_tag[:-1]+('-gzip' if use_gzip else '-identity')+'"'
+        modified=formatdate(stat.st_mtime,usegmt=True)
+        match=self.headers.get('If-None-Match')
+        valid=match is not None and any(tag.strip()=='*' or tag.strip().removeprefix('W/')==etag for tag in match.split(','))
+        if match is None and self.headers.get('If-Modified-Since'):
+            try:
+                parsed=parsedate_to_datetime(self.headers['If-Modified-Since'])
+                # HTTP-date has whole-second precision, including mtimes ending .9999.
+                valid=parsed.tzinfo is not None and int(stat.st_mtime)<=int(parsed.timestamp())
+            except (ValueError,TypeError,OverflowError):pass
+        body=packed if use_gzip else raw
+        self.send_response(304 if valid else 200)
+        self.send_header('ETag',etag)
+        self.send_header('Last-Modified',modified)
+        self.send_header('Vary','Accept-Encoding')
+        self.send_header('Cache-Control','private, no-cache, must-revalidate')
+        self.send_header('X-Content-Type-Options','nosniff')
+        self.send_header('X-Frame-Options','DENY')
+        self.send_header('Content-Security-Policy',"default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
+        if use_gzip and not valid:self.send_header('Content-Encoding','gzip')
+        if not valid:
+            self.send_header('Content-Type',mime)
+            self.send_header('Content-Length',str(len(body)))
+        self.end_headers()
+        if not valid and not getattr(self,'_head_only',False):self.wfile.write(body)
+
+    def do_HEAD(self):
+        self._head_only=True
+        try:self.get_response()
+        finally:self._head_only=False
 
     def error_json(self, code, message):
         self.respond(code, {"error": message})
@@ -90,7 +151,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(200, monitor.history(query.get('metric',['cpu'])[0], query.get('range',['24h'])[0]))
             if path.path == '/api/v1/overview':
                 from .historian import overview_history
-                return self.respond(200,overview_history(parse_qs(path.query).get('period',['24h'])[0]))
+                return self.respond(200,overview_history(parse_qs(path.query).get('period',['24h'])[0],parse_qs(path.query).get('view',['full'])[0]))
             if path.path.startswith('/api/v1/devices/'):
                 from .historian import device_history
                 parts=path.path.strip('/').split('/')
@@ -135,6 +196,8 @@ class Handler(BaseHTTPRequestHandler):
             if not fpath.is_relative_to(STATIC.resolve()) or not fpath.is_file():
                 return self.error_json(404, "Not found")
             content_type = mimetypes.guess_type(fpath)[0] or "application/octet-stream"
+            if fpath.suffix.lower() in ('.js','.css','.svg','.woff2') and fpath.stat().st_size<=512*1024:
+                return self.static_code(fpath,content_type)
             return self.respond(200, fpath.read_bytes(), content_type)
         except (ValueError, TypeError) as exc:
             return self.error_json(400, str(exc))

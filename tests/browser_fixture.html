@@ -1,0 +1,59 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Network Observatory test — synthetic only</title></head>
+<body><div id="smoke" data-status="pending">Executando fixture</div>
+<iframe id="frame" src="/router/" style="width:1300px;height:900px"></iframe>
+<script>
+(async()=>{
+ const out=document.getElementById('smoke'),frame=document.getElementById('frame'),notes=[];
+ const sleep=n=>new Promise(r=>setTimeout(r,n));
+ const wait=async(fn,label,ms=13000)=>{const start=Date.now();while(Date.now()-start<ms){const r=fn();if(r)return r;await sleep(35);}throw Error('Timeout '+label)};
+ const assert=(value,msg)=>{if(!value)throw Error(msg)};
+ try{
+  await wait(()=>frame.contentDocument?.getElementById('modeToggle'),'shell');
+  const d=frame.contentDocument,w=frame.contentWindow;
+  await wait(()=>w.FNO?.state?.resources?.status?.phase==='ready','first status');
+  assert(d.querySelector('[data-metric="cpu"]').textContent.trim()==='0','real zero CPU lost');
+  assert(['loading','error'].includes(w.FNO.state.resources.overview.phase),'status not independently available from summary');
+  notes.push('status visible before history');
+  await wait(()=>w.FNO.state.resources.overview.phase==='error','summary HTTP500');
+  assert(w.FNO.state.api===true,'history error incorrectly marked server offline');
+  assert(d.querySelector('#overviewState [data-retry-resource="overview"]'),'missing local retry');
+  notes.push('history error isolated');
+  d.querySelector('#overviewState [data-retry-resource="overview"]').click();
+  await wait(()=>w.FNO.state.resources.overview.phase==='ready','overview retry');
+  assert(w.FNO.state.overview.summary.sampled===true,'home requested full expensive history');
+  assert(d.querySelector('#overviewChart svg'),'summary chart not drawn');
+  assert(w.FNO.state.resources.inventory.phase==='empty','valid empty inventory misclassified');
+  notes.push('summary retry and [] inventory');
+  const trigger=d.querySelector('.nav-item[data-detail="latency"]');
+  trigger.focus();trigger.click();
+  await wait(()=>!d.getElementById('sheetLayer').hidden,'sheet opening');
+  assert(d.getElementById('legendBox').textContent.includes('TCP gateway'),'stale legend inherited from traffic');
+  assert(d.querySelector('[data-period="24h"]').getAttribute('aria-pressed')==='true','initial range not active');
+  assert(d.getElementById('historyChart').getAttribute('aria-busy')==='true','loading missing aria busy');
+  notes.push('correct immediate legend/range');
+  d.querySelector('[data-period="7d"]').click();
+  d.querySelector('[data-period="1y"]').click();
+  assert(d.querySelector('[data-period="1y"]').getAttribute('aria-pressed')==='true','new period not selected immediately');
+  assert(d.querySelector('[data-period="7d"]').getAttribute('aria-pressed')==='false','old period still marked active');
+  assert(d.getElementById('chartSubtitle').textContent.includes('1y'),'old subtitle visible as current');
+  await wait(()=>d.getElementById('historyChart').dataset.phase==='error','synthetic year HTTP500');
+  assert(d.querySelector('#historyChart [data-sheet-retry]'),'missing year retry');
+  notes.push('rapid period change and error');
+  d.querySelector('#historyChart [data-sheet-retry]').click();
+  await wait(()=>d.getElementById('historyChart').dataset.phase==='ready','year retry ready');
+  assert(!d.getElementById('exportCsv').disabled,'export not enabled after valid bundle');
+  notes.push('retry and valid bundle');
+  // 1y bundle is reusable; second same-year selection after a short trip should not refetch.
+  d.querySelector('[data-period="6h"]').click();
+  d.querySelector('[data-period="1y"]').click();
+  await wait(()=>d.getElementById('historyChart').dataset.phase==='ready','cached year');
+  assert(d.querySelector('[data-period="1y"]').getAttribute('aria-pressed')==='true','cached period mismatch');
+  notes.push('reuse cached full-year bundle');
+  d.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+  assert(d.getElementById('sheetLayer').hidden,'Escape did not close sheet');
+  assert(d.activeElement===trigger,'focus did not return after closing sheet');
+  notes.push('escape and focus return');
+  out.dataset.status='pass';out.textContent=notes.join(' | ');
+ }catch(e){out.dataset.status='fail';out.textContent=String(e.message||e);console.error(e);}
+})();
+</script></body></html>

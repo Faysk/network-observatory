@@ -7,7 +7,9 @@ const time=v=>v?new Date(v).toLocaleString('pt-PT',{day:'2-digit',month:'short',
 const retention=days=>days===0?'Sem limite':days==null?'Sem informação':fmt(days,0)+' dias';
 const fresh=ts=>{const age=Date.now()-Date.parse(ts);return age>=-5000&&age<=180000;};
 const duration=v=>v==null?'Sem dados':`${Math.floor(v/3600)}h ${Math.floor(v%3600/60)}m`;
-const state={status:null,overview:null,clients:[],metric:null,period:'24h',bundle:null,filter:'all',main:true,secondary:true,request:0,api:false};
+const state={status:null,overview:null,clients:[],metric:null,period:'24h',bundle:null,filter:'all',main:true,secondary:true,request:0,api:false,resources:{
+ status:{phase:'idle'},overview:{phase:'idle'},inventory:{phase:'idle'}
+ }};
 const config={
  traffic:{title:'Contadores WAN',desc:'Bytes cumulativos reportados. Não são consumo do período nem velocidade de Internet.',a:'wan_rx_bytes',b:'wan_tx_bytes',main:'RX reportado',secondary:'TX reportado',unit:'GiB',scale:2**30},
  router:{title:'Router Huawei',desc:'CPU e memória reais; temperatura óptica não é temperatura da CPU.',a:'cpu_pct',b:'memory_pct',main:'CPU',secondary:'RAM',unit:'%',scale:1},
@@ -18,7 +20,99 @@ const config={
  events:{title:'Eventos e logs',desc:'Eventos persistidos pela aplicação. Logs internos do router não são recolhidos.',a:null,b:null,main:'Eventos',unit:'',scale:1},
  integrations:{title:'Integrações e fontes',desc:'Estados derivados das últimas leituras recebidas, sem introdução de tokens no navegador.',a:null,b:null,main:'Fontes',unit:'',scale:1}
 };
-async function api(url){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);try{const r=await fetch(url,{signal:controller.signal});if(!r.ok)throw Error('Resposta '+r.status);return await r.json();}finally{clearTimeout(timer);}}
+async function api(url,{signal,timeout=20000}={}){
+ const controller=new AbortController(),relay=()=>controller.abort();
+ if(signal){if(signal.aborted)controller.abort();else signal.addEventListener('abort',relay,{once:true});}
+ const timer=setTimeout(()=>controller.abort(),timeout);
+ try{const r=await fetch(url,{signal:controller.signal,cache:'no-store'});
+   if(!r.ok)throw Error('Resposta '+r.status);
+   return await r.json();
+ }finally{clearTimeout(timer);signal?.removeEventListener('abort',relay);}
+}
+const bundleCache=new Map(),sheetFlights=new Map(),BUNDLE_TTL=20000;
+let activeSheetAbort=null;
+function abortSheet(){
+ if(activeSheetAbort){activeSheetAbort.abort();activeSheetAbort=null;}
+}
+function cachedFullBundle(period){
+ const cached=bundleCache.get(period);
+ if(cached&&Date.now()-cached.at<BUNDLE_TTL)return cached.data;
+ // A legacy fully-loaded home bundle may be reused; a summary cannot.
+ if(period==='24h'&&state.overview?.stats&&state.overview?.probes&&state.overview?.series)return state.overview;
+ return null;
+}
+async function sheetBundle(period,signal){
+ const cached=cachedFullBundle(period);
+ if(cached)return cached;
+ let flight=sheetFlights.get(period);
+ // A previous consumer may have aborted this flight before its finally ran.
+ // A new visit needs a fresh request rather than inheriting AbortError.
+ if(flight?.controller.signal.aborted){sheetFlights.delete(period);flight=null;}
+ if(!flight){
+   const controller=new AbortController(),consumers=new Set();
+   const pending=api('/api/v1/overview?period='+encodeURIComponent(period),{signal:controller.signal})
+     .then(data=>{
+       if(!data||!data.period||!data.stats||!Array.isArray(data.series))throw Error('Histórico inválido');
+       bundleCache.set(period,{at:Date.now(),data});
+       while(bundleCache.size>4)bundleCache.delete(bundleCache.keys().next().value);
+       return data;
+     }).finally(()=>{if(sheetFlights.get(period)?.pending===pending)sheetFlights.delete(period)});
+   flight={pending,controller,consumers};sheetFlights.set(period,flight);
+ }
+ const token={};flight.consumers.add(token);
+ const release=()=>{
+   flight.consumers.delete(token);
+   if(!flight.consumers.size&&sheetFlights.get(period)===flight)flight.controller.abort();
+ };
+ if(signal?.aborted){release();throw new DOMException('Cancelled','AbortError')}
+ signal?.addEventListener('abort',release,{once:true});
+ try{return await flight.pending}
+ finally{signal?.removeEventListener('abort',release);release();}
+}
+function resourceMarkup(name,label){
+ const meta=state.resources[name],phase=meta.phase,old=phase==='stale';
+ const retry=phase==='error'||phase==='stale';
+ const message=phase==='loading'?'A carregar '+label+'…':phase==='error'?'Falha ao carregar '+label+'.':old?'Última leitura preservada, mas a atualização falhou.':phase==='empty'?'Não foram encontrados dados de '+label+'.':'';
+ return message?'<span>'+esc(message)+'</span>'+(retry?' <button type="button" data-retry-resource="'+name+'">Tentar novamente</button>':''):'';
+}
+function updateResourceRegions(){
+ for(const [name,id,label] of [['overview','#overviewState','histórico'],['inventory','#inventoryState','inventário']]){
+   const el=$(id);if(!el)continue;
+   const phase=state.resources[name].phase;
+   el.dataset.phase=phase;el.setAttribute('aria-busy',String(phase==='loading'));
+   el.innerHTML=resourceMarkup(name,label);
+ }
+ const chartNode=$('#overviewChart');if(chartNode)chartNode.setAttribute('aria-busy',String(state.resources.overview.phase==='loading'));
+}
+function publishResource(name,data){
+ if(name==='status'){state.status=data;state.api=true;}
+ if(name==='overview')state.overview=data;
+ if(name==='inventory')state.clients=data.clients;
+ const isEmpty=name==='overview'?!(data.series?.length||data.probes?.length||data.events?.length):
+   name==='inventory'?!data.clients?.length:false;
+ state.resources[name]={phase:isEmpty?'empty':'ready',at:Date.now()};
+ renderHome();updateResourceRegions();
+}
+async function fetchResource(name){
+ state.resources[name]={...state.resources[name],phase:'loading'};
+ updateResourceRegions();
+ try{
+   const path={status:'/api/status',overview:'/api/v1/overview?period=24h&view=summary',
+                inventory:'/api/router/clients'}[name];
+   const data=await api(path);
+   if(name==='inventory'&&!Array.isArray(data?.clients))throw Error('Inventário inválido');
+   if(name==='overview'&&(!data?.period||!Array.isArray(data.series)))throw Error('Resumo inválido');
+   publishResource(name,data);
+   return true;
+ }catch(error){
+   if(name==='status')state.api=false;
+   const had=name==='status'?!!state.status:name==='overview'?!!state.overview:state.resources.inventory.at!=null;
+   state.resources[name]={phase:had?'stale':'error',at:state.resources[name].at||null,error:String(error)};
+   renderHome();updateResourceRegions();
+   return false;
+ }
+}
+
 function toast(message){$('#toast').textContent=message;$('#toast').classList.add('visible');clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#toast').classList.remove('visible'),4500);}
 function tile(label,value,unit='',foot=''){return `<article class="d-stat"><div class="d-stat-label">${esc(label)}</div><strong>${esc(value)} <small>${esc(unit)}</small></strong><span>${esc(foot)}</span></article>`;}
 function keyvals(rows){return `<div class="d-keyvals">${rows.map(([k,v])=>`<div class="d-keyval"><small>${esc(k)}</small><strong>${esc(v??'Sem dados')}</strong></div>`).join('')}</div>`;}
@@ -65,7 +159,7 @@ function chart(node,series,defs,period,selection){
  area.addEventListener('pointerleave',()=>{if(document.activeElement!==area)hide();});area.addEventListener('blur',hide);
  area.addEventListener('focus',()=>inspect(index));area.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','Home','End','Escape'].includes(e.key)){e.preventDefault();if(e.key==='Escape'){hide();return;}inspect(e.key==='Home'?0:e.key==='End'?valid.length-1:index+(e.key==='ArrowRight'?1:-1));}});
 }
-function appOnline(){return state.api?state.clients.filter(c=>c.quality==='ok'&&c.reported_status==='Online').length:null;}
+function appOnline(){const ready=['ready','empty'].includes(state.resources.inventory.phase);return state.api&&ready?state.clients.filter(c=>c.quality==='ok'&&c.reported_status==='Online').length:null;}
 function renderHome(){
  const s=state.status,h=s?.huawei||{},current=state.api&&h.quality==='ok'&&fresh(h.collected_at),m=current?h.metrics||{}:{},o=state.overview;
  const probe=s?.probe,probeCurrent=state.api&&probe&&fresh(probe.ts);
@@ -85,7 +179,7 @@ function renderHome(){
  $('[data-metric="latency"]').textContent=fmt(probeCurrent?probe.router_ms:null);
  $('[data-metric="cpu"]').textContent=fmt(m.cpu_pct);
  const online=appOnline();
- $('[data-metric="devices"]').textContent=fmt(online,0);$('[data-metric="devices"]').nextElementSibling.textContent='/ '+state.clients.length;
+ $('[data-metric="devices"]').textContent=fmt(online,0);$('[data-metric="devices"]').nextElementSibling.textContent='/ '+(state.resources.inventory.at!=null?state.clients.length:'—');
  $('.traffic-summary-values').innerHTML=`<div><span class="label-with-dot"><i class="series-dot download"></i> RX REPORTADO</span><strong>${fmt(counters?.rx_bytes==null?null:counters.rx_bytes/2**30,2)} <small>GiB</small></strong></div><div><span class="label-with-dot"><i class="series-dot upload"></i> TX REPORTADO</span><strong>${fmt(counters?.tx_bytes==null?null:counters.tx_bytes/2**30,2)} <small>GiB</small></strong></div><div class="mini-time">${esc(time(h.collected_at))}</div>`;
  if(o)chart($('#overviewChart'),o.series,[{key:'wan_rx_bytes',label:'RX acumulado',color:'#c3a4ff',scale:2**30,unit:'GiB'},{key:'wan_tx_bytes',label:'TX acumulado',color:'#69e9dc',scale:2**30,unit:'GiB'}],o.period);
  $('.axis-row').hidden=true;
@@ -95,7 +189,18 @@ function renderHome(){
  ['traffic','latency','router','devices'].forEach(metric=>{const c=config[metric],rows=c.probes?o?.probes:o?.series,node=$('#spark-'+metric);node.replaceChildren();const vals=(rows||[]).map(r=>r[c.a]).filter(Number.isFinite);if(vals.length<2)return;let min=Math.min(...vals),max=Math.max(...vals),previous=null;const points=(rows||[]).map(r=>{const v=r[c.a];if(!Number.isFinite(v)){previous=null;return '';}const gap=!previous||Date.parse(r.timestamp)-Date.parse(previous.timestamp_end||previous.timestamp)>180000||r.max_gap_seconds>180;const x=(Date.parse(r.timestamp)-Date.parse(o.period.from))/Math.max(1,Date.parse(o.period.to)-Date.parse(o.period.from))*108;const segment=`${gap?'M':'L'}${x},${24-(v-min)/Math.max(1,max-min)*20}`;previous=r;return segment;}).join(' ');node.innerHTML=`<path d="${points}" fill="none" stroke="${metric==='latency'?'#d0a7ff':'#7de6c4'}" stroke-width="2"/>`;});
  document.dispatchEvent(new CustomEvent('fno:update'));
 }
-async function refresh(){if(state.refreshing)return;state.refreshing=true;document.body.classList.add('is-loading');$('#modeToggle').disabled=true;$('#modeToggle').setAttribute('aria-busy','true');try{const [status,overview,inventory]=await Promise.all([api('/api/status'),api('/api/v1/overview?period=24h'),api('/api/router/clients')]);state.status=status;state.overview=overview;state.clients=inventory.clients;state.api=true;renderHome();if(state.metric)await loadSheet();}catch(e){state.api=false;renderHome();toast('Recolha local indisponível: '+e.message);}finally{state.refreshing=false;document.body.classList.remove('is-loading');$('#modeToggle').disabled=false;$('#modeToggle').setAttribute('aria-busy','false');}}
+async function refresh(){
+ if(state.refreshing||document.hidden)return;
+ state.refreshing=true;document.body.classList.add('is-loading');
+ $('#modeToggle').disabled=true;$('#modeToggle').setAttribute('aria-busy','true');
+ try{
+   // Publish status before any slower aggregate or inventory returns.
+   await Promise.allSettled(['status','overview','inventory'].map(name=>fetchResource(name)));
+ }finally{
+   state.refreshing=false;document.body.classList.remove('is-loading');
+   $('#modeToggle').disabled=false;$('#modeToggle').setAttribute('aria-busy','false');
+ }
+}
 function integrationPanel(){const s=state.status,h=s?.huawei||{},probe=s?.probe,partial=Object.entries(h.sections||{}).filter(([k,v])=>k!=='router_logs'&&v!=='ok').map(([k])=>k);return keyvals([
  ['Huawei HTTP',state.api&&h.quality==='ok'?(partial.length?'Parcial ('+partial.join(', ')+') · ':'Ativo · ')+time(h.collected_at):'Sem leitura recente'],
  ['Sondas TCP',state.api&&probe&&fresh(probe.ts)?'Ativas · '+time(probe.ts):'Sem leitura recente'],
@@ -104,11 +209,68 @@ function panelExtras(metric){const h=state.status?.huawei||{},fresh=state.api&&h
  if(metric==='router')return keyvals([['Firmware',h.firmware],['RAM',fmt(h.metrics?.memory_pct)+'%'],['Tempo ligado',duration(h.metrics?.uptime_seconds)],['Óptica RX',fmt(h.metrics?.optical_rx_dbm)+' dBm'],['Óptica TX',fmt(h.metrics?.optical_tx_dbm)+' dBm'],['Temperatura do transceiver',fmt(h.metrics?.optical_temp_c)+' °C'],['PON',h.health?.pon_connected==null?'Sem dados':h.health.pon_connected?'Ligado':'Desligado'],...Object.entries(h.interfaces||{}).map(([k,v])=>[k.toUpperCase(),`RX ${fmt(v.rx_bytes,0)} bytes · TX ${fmt(v.tx_bytes,0)} bytes · erros RX/TX ${fmt(v.rx_errors,0)}/${fmt(v.tx_errors,0)}${k.startsWith('lan')?` · ${v.link_up==null?'estado não reportado':v.link_up?'ligada '+fmt(v.speed_mbps,0)+' Mbit/s':'sem ligação'}`:''}`])]);
  if(metric==='wifi')return keyvals(Object.entries(h.wifi||{}).map(([k,v])=>[k.toUpperCase(),`${v.enabled==null?'Estado não reportado':v.enabled?'Ativa':'Inativa'} · ${v.band||'banda desconhecida'} · canal ${fmt(v.channel,0)} · RX ${fmt(v.rx_bytes,0)} bytes · TX ${fmt(v.tx_bytes,0)} bytes · erros ${fmt(v.rx_errors,0)}/${fmt(v.tx_errors,0)}`]));
  if(metric==='health')return integrationPanel();return '';}
-async function openSheet(metric){if(metric==='devices'){document.dispatchEvent(new CustomEvent('fno:devices'));return;}
+async function openSheet(metric){
+ if(metric==='devices'){document.dispatchEvent(new CustomEvent('fno:devices'));return;}
+ if(state.metric)abortSheet();
  state.metric=config[metric]?metric:'router';state.period='24h';state.filter='all';state.main=true;state.secondary=true;state.lastFocus=document.activeElement;
- $('#sidebar').classList.remove('open');$('#menuToggle').setAttribute('aria-expanded','false');$('#sheetLayer').hidden=false;document.body.classList.add('sheet-open');$('#detailTitle').textContent=config[state.metric].title;$('#detailDesc').textContent=config[state.metric].desc;$('#detailSheet').focus();await loadSheet();}
-function closeSheet(){state.metric=null;state.request++;$('#sheetLayer').hidden=true;document.body.classList.remove('sheet-open');$('.shell').inert=false;state.lastFocus?.focus();}
-async function loadSheet(){const request=++state.request,metric=state.metric,period=state.period;state.bundle=null;$('#exportCsv').disabled=true;$('#detailStats').replaceChildren();$('#analysisRows').replaceChildren();$('#detailEvents').replaceChildren();$('#selectionSummary').textContent='Carregando as amostras do período selecionado…';$('#analysisText').textContent=config[metric].desc;$('#historyChart').innerHTML=empty('A carregar histórico…');try{const bundle=await api('/api/v1/overview?period='+period);if(request!==state.request||!state.metric)return;state.bundle=bundle;renderSheet();}catch(e){if(request!==state.request)return;$('#historyChart').innerHTML=empty('Não foi possível carregar o histórico.');toast(e.message);}}
+ $('#sidebar').classList.remove('open');$('#menuToggle').setAttribute('aria-expanded','false');
+ $('#sheetLayer').hidden=false;document.body.classList.add('sheet-open');$('.shell').inert=true;
+ $('#detailSheet').focus();await loadSheet();
+}
+function closeSheet(){
+ abortSheet();state.metric=null;state.bundle=null;state.request++;
+ $('#sheetLayer').hidden=true;document.body.classList.remove('sheet-open');
+ $('.shell').inert=false;state.lastFocus?.focus({preventScroll:true});
+}
+function updateSheetMeta(){
+ const c=config[state.metric];if(!c)return;
+ $('#detailTitle').textContent=c.title;$('#detailCrumb').textContent=c.title.toUpperCase();
+ $('#detailDesc').textContent=c.desc;$('#chartTitle').textContent=c.title;
+ $('#detailEyebrow').textContent='INVESTIGAÇÃO / LEITURAS REAIS';
+ $$('[data-period]').forEach(el=>{const active=el.dataset.period===state.period;
+   el.classList.toggle('active',active);el.setAttribute('aria-pressed',String(active))});
+ $('#legendBox').innerHTML=[
+   ...(c.a?[['main',c.main,state.main]]:[]),
+   ...(c.b?[['secondary',c.secondary,state.secondary]]:[])
+ ].map(([key,label,on])=>'<button type="button" class="legend-button '+(on?'':'off')+
+    '" data-series="'+key+'" aria-pressed="'+on+'">'+esc(label)+'</button>').join('');
+ $('#chartSubtitle').textContent='Período '+state.period+' · a aguardar a consulta atual.';
+ $('#resolutionText').textContent='Cobertura e resolução a carregar para '+state.period+'.';
+}
+async function loadSheet(){
+ if(!state.metric)return;
+ abortSheet();
+ const request=++state.request,metric=state.metric,period=state.period;
+ const controller=new AbortController();activeSheetAbort=controller;
+ state.bundle=null;updateSheetMeta();
+ $('#historyChart').setAttribute('aria-busy','true');
+ $('#exportCsv').disabled=true;$('#detailStats').replaceChildren();
+ $('#analysisRows').replaceChildren();$('#detailEvents').replaceChildren();
+ $('#selectionSummary').textContent='A carregar '+period+'. Dados do período anterior não são apresentados.';
+ $('#analysisText').textContent=config[metric].desc;
+ $('#historyChart').innerHTML=empty('A carregar histórico de '+period+'…');
+ try{
+   const bundle=await sheetBundle(period,controller.signal);
+   if(controller.signal.aborted||request!==state.request||state.metric!==metric||state.period!==period)return;
+   state.bundle=bundle;renderSheet();
+   const populated=bundle.series.length||bundle.probes?.length||bundle.events?.length;
+   if(!populated){
+     $('#historyChart').innerHTML=empty('Não existem amostras neste período.');
+     $('#historyChart').dataset.phase='empty';
+   }else $('#historyChart').dataset.phase='ready';
+ }catch(e){
+   if(controller.signal.aborted||request!==state.request||state.metric!==metric)return;
+   $('#historyChart').dataset.phase='error';
+   $('#historyChart').innerHTML='<div role="alert">Não foi possível carregar o histórico de '+esc(period)+
+     '. <button type="button" data-sheet-retry>Tentar novamente</button></div>';
+   $('#chartSubtitle').textContent='Histórico de '+period+' indisponível. Pode tentar novamente.';
+ }finally{
+   if(request===state.request&&state.metric===metric){
+     $('#historyChart').setAttribute('aria-busy','false');
+     if(activeSheetAbort===controller)activeSheetAbort=null;
+   }
+ }
+}
 function renderSheet(){const c=config[state.metric],b=state.bundle;if(!c||!b)return;$('#detailTitle').textContent=c.title;$('#detailCrumb').textContent=c.title.toUpperCase();$('#detailDesc').textContent=c.desc;$('#detailEyebrow').textContent='INVESTIGAÇÃO / LEITURAS REAIS';$('#chartTitle').textContent=c.title;$('#chartSubtitle').textContent=`${time(b.period.from)} — ${time(b.period.to)} · médias por intervalo; extremos preservados`;
  $$('[data-period]').forEach(el=>{const active=el.dataset.period===state.period;el.classList.toggle('active',active);el.setAttribute('aria-pressed',active);});
  const defs=[...(c.a&&state.main?[{key:c.a,label:c.main,color:'#c3a4ff',scale:c.scale,unit:c.unit}]:[]),...(c.b&&state.secondary?[{key:c.b,label:c.secondary,color:'#69e9dc',scale:c.scale,unit:c.unit}]:[])];
@@ -136,7 +298,9 @@ function trap(event,layer){if(event.key!=='Tab')return;const nodes=$$('button,a[
 function init(){
  $$('[data-detail]').forEach(el=>el.addEventListener('click',()=>openSheet(el.dataset.detail)));
  $('#modeToggle').addEventListener('click',refresh);$('#sheetClose').addEventListener('click',closeSheet);$('#sheetBackdrop').addEventListener('click',closeSheet);
- $('#periodButtons').addEventListener('click',e=>{const el=e.target.closest('[data-period]');if(el){state.period=el.dataset.period;loadSheet();}});
+ $('#periodButtons').addEventListener('click',e=>{const el=e.target.closest('[data-period]');if(el&&state.period!==el.dataset.period){state.period=el.dataset.period;loadSheet();}});
+ $('#historyChart').addEventListener('click',e=>{if(e.target.closest('[data-sheet-retry]'))loadSheet();});
+ document.addEventListener('click',e=>{const b=e.target.closest('[data-retry-resource]');if(b)fetchResource(b.dataset.retryResource);});
  $('#legendBox').addEventListener('click',e=>{const el=e.target.closest('[data-series]');if(!el)return;state[el.dataset.series]=!state[el.dataset.series];if(!state.main&&!state.secondary)state.main=true;renderSheet();});
  $('#eventsFilter').addEventListener('click',()=>{state.filter=state.filter==='all'?'warning':'all';$('#eventsFilter').textContent=state.filter==='all'?'Todos':'Avisos';renderSheet();});
  $('#exportCsv').addEventListener('click',exportSummary);$('#infoBtn').addEventListener('click',()=>openSheet('integrations'));

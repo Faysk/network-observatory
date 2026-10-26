@@ -2,6 +2,9 @@
 import json
 import math
 import re
+import threading
+import time
+from collections import OrderedDict
 from collections import deque
 from datetime import datetime, timezone, timedelta
 from . import core
@@ -105,7 +108,7 @@ def device_history(identifier,period='24h'):
             'capabilities':{'client_bytes':'unknown','client_traffic':'unsupported','client_rssi':'supported' if stats['rssi_dbm']['sample_count'] else 'unknown',
                             'phy_rate':'supported' if stats['link_rx_phy_mbps']['sample_count'] else 'unknown','client_probe':'not_configured','exact_sessions':'unsupported'}}
 
-def overview_history(period='24h'):
+def _overview_history_uncached(period='24h'):
     start,end=window(period)
     keys=('cpu_pct','memory_pct','optical_rx_dbm','optical_tx_dbm','wan_rx_bytes','wan_tx_bytes','online_clients','rssi_dbm')
     buckets=Buckets(start,end,keys);probes=Buckets(start,end,('router_ms','internet_ms','router_online','internet_online'))
@@ -129,3 +132,111 @@ def overview_history(period='24h'):
             'sample_coverage':{'sample_count':buckets.count,'expected_count':math.ceil(PERIODS[period]/60),'coverage_percent':min(100,buckets.count/max(1,math.ceil(PERIODS[period]/60))*100)},
             'measurement_semantics':{'wan':'raw router counters; width/reset not validated; no throughput or consumption derived','wifi':'arithmetic RSSI mean of stations reported in each sample'},
             'quality':{'sample_count':buckets.count,'expected_count':math.ceil(PERIODS[period]/60),'coverage_percent':min(100,buckets.count/max(1,math.ceil(PERIODS[period]/60))*100),'aggregation':'bucket_mean_with_min_max_envelope'}}
+
+
+# Memory-only cache; all original observations remain on the configured SQLite volume.
+# Never reuse an aggregate after an INSERT, including historical backfill.
+_OVERVIEW_TTL=20
+_OVERVIEW_MAX=12
+_overview_cache=OrderedDict()
+_overview_locks={}
+_overview_mutex=threading.Lock()
+_overview_slots=threading.BoundedSemaphore(2)
+
+def _revision(db):
+    return tuple(db.execute('SELECT COALESCE(MAX(id),0) FROM '+table).fetchone()[0]
+                 for table in ('huawei_samples','samples','events'))
+
+def overview_summary(period='24h'):
+    """Cheap home summary: exact coverage counts + sampled *observations* for sparklines.
+
+    Summary series are NOT aggregates or replacement for detailed histories.
+    Every represented value is a real stored observation, not an interpolated mean.
+    """
+    start,end=window(period)
+    start_iso,end_iso=start.isoformat(),end.isoformat()
+    span=PERIODS[period]
+    bucket=max(60,math.ceil(span/96))
+    with core.connect() as db:
+        # Both coverage and underlying original records remain exact.
+        count=db.execute('SELECT COUNT(*) FROM huawei_samples WHERE ts>=? AND ts<=?',
+                         (start_iso,end_iso)).fetchone()[0]
+        # At most one original reading per summary bucket, using ID index on the second pass.
+        ids=[row[0] for row in db.execute(
+            "SELECT MAX(id) FROM huawei_samples WHERE ts>=? AND ts<=? "
+            "GROUP BY CAST((CAST(strftime('%s',ts) AS INTEGER)-?)/? AS INTEGER)",
+            (start_iso,end_iso,int(start.timestamp()),bucket))]
+        series=[]
+        if ids:
+            for row in db.execute('SELECT ts,payload FROM huawei_samples WHERE id IN ('+
+                                  ','.join('?' for _ in ids)+') ORDER BY ts,id',ids):
+                payload=json.loads(row['payload'])
+                p={'timestamp':row['ts'],'timestamp_end':row['ts'],'sample_count':1,
+                   'max_gap_seconds':0}
+                p.update(payload.get('metrics',{}))
+                wan=next((name for name,value in payload.get('wan_states',{}).items()
+                          if 'Internet' in value.get('services',[])),None)
+                counters=payload.get('interfaces',{}).get(wan,{})
+                p['wan_rx_bytes']=counters.get('rx_bytes');p['wan_tx_bytes']=counters.get('tx_bytes')
+                if 'clients' in payload:
+                    p['online_clients']=sum(c.get('reported_status')=='Online' for c in payload['clients'])
+                signals=[v['rssi_dbm'] for v in payload.get('stations',[]) if v.get('rssi_dbm') is not None]
+                p['rssi_dbm']=sum(signals)/len(signals) if signals else None
+                series.append(p)
+        probe_ids=[row[0] for row in db.execute(
+            "SELECT MAX(id) FROM samples WHERE ts>=? AND ts<=? "
+            "GROUP BY CAST((CAST(strftime('%s',ts) AS INTEGER)-?)/? AS INTEGER)",
+            (start_iso,end_iso,int(start.timestamp()),bucket))]
+        probes=[]
+        if probe_ids:
+            for r in db.execute('SELECT * FROM samples WHERE id IN ('+
+                                ','.join('?' for _ in probe_ids)+') ORDER BY ts,id',probe_ids):
+                p=dict(r);p['timestamp']=p['ts'];p['timestamp_end']=p['ts'];p['sample_count']=1
+                p['max_gap_seconds']=0
+                probes.append(p)
+        events=[dict(r) for r in db.execute('SELECT * FROM events WHERE ts>=? AND ts<=? '
+                                            'ORDER BY ts DESC LIMIT 3',(start_iso,end_iso))]
+    expected=max(1,math.ceil(span/60))
+    return {'period':{'key':period,'from':start_iso,'to':end_iso,'resolution_seconds':bucket},
+            'series':series,'probes':probes,'events':events,
+            'quality':{'sample_count':count,'expected_count':expected,
+                       'coverage_percent':min(100,count/expected*100),
+                       'aggregation':'original_observations_sampled_for_preview'},
+            'summary':{'sampled':True,'max_buckets':96,'raw_samples_retained':True,
+                       'series_semantics':'one original stored observation per bucket',
+                       'events_limited_to':3},
+            'source':SOURCE,'collected_at':series[-1]['timestamp_end'] if series else None}
+
+def overview_history(period='24h',view='full'):
+    if view not in ('full','summary'):raise ValueError('Invalid overview view')
+    if period not in PERIODS:raise ValueError('Invalid period')
+    key=(str(core.DB_PATH.resolve()),period,view)
+    with core.connect() as db:revision=_revision(db)
+    now=time.monotonic()
+    with _overview_mutex:
+        cached=_overview_cache.get(key)
+        if cached and cached[1]==revision and now-cached[0]<_OVERVIEW_TTL:
+            _overview_cache.move_to_end(key)
+            # Immutable result by convention; serialization doesn't modify nested values.
+            return cached[2]
+        # Repeated requests for the same key share a lock, not a recalculation.
+        lock=_overview_locks.setdefault(key,threading.Lock())
+    with lock:
+        with core.connect() as db:revision=_revision(db)
+        now=time.monotonic()
+        with _overview_mutex:
+            cached=_overview_cache.get(key)
+            if cached and cached[1]==revision and now-cached[0]<_OVERVIEW_TTL:
+                _overview_cache.move_to_end(key)
+                return cached[2]
+        # At most two distinct cache misses can read the SQLite volume concurrently.
+        with _overview_slots:
+            result=overview_summary(period) if view=='summary' else _overview_history_uncached(period)
+        with core.connect() as db:end_revision=_revision(db)
+        # If a collector wrote during this read, don't cache an inconsistent version.
+        if end_revision==revision:
+            with _overview_mutex:
+                _overview_cache[key]=(time.monotonic(),revision,result)
+                _overview_cache.move_to_end(key)
+                while len(_overview_cache)>_OVERVIEW_MAX:_overview_cache.popitem(last=False)
+        return result

@@ -93,6 +93,14 @@ def init_db():
           id INTEGER PRIMARY KEY, ts TEXT NOT NULL, severity TEXT NOT NULL,
           category TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL, source TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
+        CREATE TABLE IF NOT EXISTS device_group_members (
+          mac TEXT PRIMARY KEY, group_id TEXT NOT NULL, source TEXT NOT NULL,
+          updated_at TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS idx_device_group ON device_group_members(group_id);
+        CREATE TABLE IF NOT EXISTS device_presentation_overrides (
+          mac TEXT PRIMARY KEY, nickname TEXT, category TEXT, icon TEXT, note TEXT,
+          revision INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL);
+
         """)
 
 
@@ -273,18 +281,28 @@ def get_archive(kind='huawei',after=0,limit=1000):
 def get_router_clients(mac=None, limit=120):
     """Retained client observations; absence is never inferred as offline."""
     from .adapters.huawei_b7 import normalise_mac,is_lan_client
+    from .device_identity import get_registry, inspect_mac
+    from .device_classifier import classify_client
+    from .device_preferences import read_presentation
+    # One lazy, immutable registry per response; no lookup HTTP or database writes.
+    # Configured main database is expected to live on microSD in S7 deployments.
+    registry = get_registry(DB_PATH.parent) if mac is None else None
     with LOCK,connect() as db:
         if mac is not None:
             if normalise_mac(mac)!=mac or mac is None:raise ValueError('Invalid MAC')
             rows=db.execute('SELECT ts,payload FROM router_client_samples WHERE mac=? ORDER BY ts DESC,id DESC LIMIT ?',
                             (mac,max(1,min(2000,int(limit))))).fetchall()
             return {'mac':mac,'source':'huawei-b7-http','observations':[dict(json.loads(r['payload']),collected_at=r['ts']) for r in rows]}
-        rows=db.execute('''WITH ranked AS (
-                          SELECT ts,payload,mac,ROW_NUMBER() OVER(PARTITION BY mac ORDER BY ts DESC,id DESC) AS rn
-                          FROM router_client_samples),summary AS (
-                          SELECT mac,MIN(ts) AS first_seen,COUNT(*) AS observations FROM router_client_samples GROUP BY mac)
-                          SELECT r.ts,r.payload,g.first_seen,g.observations FROM ranked r JOIN summary g ON g.mac=r.mac
-                          WHERE r.rn=1 ORDER BY r.ts DESC,r.mac''').fetchall()
+        # Count on the narrow MAC/ts index, then read only the latest payload per MAC.
+        # A backfilled older timestamp must not win just because its ID is newer.
+        rows=db.execute('''WITH summary AS (
+                          SELECT mac,MIN(ts) AS first_seen,COUNT(*) AS observations
+                          FROM router_client_samples GROUP BY mac)
+                          SELECT r.ts,r.payload,g.first_seen,g.observations FROM summary g
+                          JOIN router_client_samples r ON r.id=(
+                            SELECT id FROM router_client_samples c WHERE c.mac=g.mac
+                            ORDER BY c.ts DESC,c.id DESC LIMIT 1)
+                          ORDER BY r.ts DESC,r.mac''').fetchall()
         result=[]
         for row in rows:
             item=json.loads(row['payload'])
@@ -292,8 +310,14 @@ def get_router_clients(mac=None, limit=120):
             age=(datetime.now(timezone.utc)-datetime.fromisoformat(row['ts'])).total_seconds()
             item.update(first_seen=row['first_seen'],last_seen=row['ts'],observations=row['observations'],
                         quality='ok' if -5<=age<=180 else 'stale')
+            # Read-only API enrichment: the original observation JSON is untouched.
+            item['identity'] = inspect_mac(item.get('mac'), registry=registry)
+            item['classification'] = classify_client(item, identity=item['identity'])
+            item['presentation'] = read_presentation(db, item.get('mac'))
             result.append(item)
-        return {'source':'huawei-b7-http','clients':result,'retention_days':RETENTION_DAYS,'retention_unlimited':RETENTION_DAYS==0}
+        from .device_groups import enrich
+        enrich(db, result)
+        return {'manual_group_count':len({c['association']['group_id'] for c in result if c['association']['group_id']}),'source':'huawei-b7-http','clients':result,'retention_days':RETENTION_DAYS,'retention_unlimited':RETENTION_DAYS==0}
 
 
 def latest_huawei(db):
