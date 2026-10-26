@@ -69,6 +69,75 @@ class ObservationTests(unittest.TestCase):
         bare=examples['station_details'].split(';',1)[1]
         self.assertEqual(o.parse('station_details',bare),o.parse('station_details',examples['station_details']))
 
+    def test_recent_archive_pagination_preserves_existing_ascending_archive(self):
+        db=sqlite3.connect(':memory:')
+        db.row_factory=sqlite3.Row
+        try:
+            o.init_db(db)
+            anchor=datetime.now(timezone.utc)-timedelta(minutes=21)
+            for i in range(5):
+                ts=(anchor+timedelta(minutes=i)).isoformat()
+                db.execute("INSERT INTO router_observations(source,ts,status,reason,payload) VALUES(?,?,?,?,?)",
+                           ('upnp',ts,'ok',None,json.dumps([{'external_port':1000+i}])))
+            newest=o.archive_recent(db,'upnp',limit=2)
+            self.assertEqual([v['data'][0]['external_port'] for v in newest['records']],[1004,1003])
+            self.assertTrue(newest['has_more'])
+            older=o.archive_recent(db,'upnp',before=newest['next_before'],limit=2)
+            self.assertEqual([v['data'][0]['external_port'] for v in older['records']],[1002,1001])
+            oldest=o.archive_recent(db,'upnp',before=older['next_before'],limit=2)
+            self.assertEqual([v['data'][0]['external_port'] for v in oldest['records']],[1000])
+            self.assertFalse(oldest['has_more'])
+            # A historical backfill can have a larger ID than today's sample.
+            # Newest-first must sort by observed timestamp, never append order.
+            old_ts=(anchor-timedelta(hours=1)).isoformat()
+            db.execute("INSERT INTO router_observations(source,ts,status,reason,payload) VALUES(?,?,?,?,?)",
+                       ('upnp',old_ts,'ok',None,json.dumps([{'external_port':999}])))
+            self.assertEqual(o.archive_recent(db,'upnp',limit=2)['records'][0]['data'][0]['external_port'],1004)
+            self.assertEqual(o.archive(db,'upnp',limit=2)['records'][0]['data'][0]['external_port'],1000)
+            for kwargs in ({'source':'unknown'}, {'source':'upnp','limit':101},
+                           {'source':'upnp','before':-1}):
+                with self.assertRaises(ValueError):o.archive_recent(db,**kwargs)
+        finally:db.close()
+
+    def test_source_trends_are_bounded_indexed_and_private(self):
+        db=sqlite3.connect(':memory:')
+        db.row_factory=sqlite3.Row
+        try:
+            o.init_db(db)
+            anchor=datetime.now(timezone.utc)-timedelta(minutes=18)
+            for i in range(6):
+                ts=(anchor+timedelta(minutes=i*3)).isoformat()
+                status='ok' if i!=2 else 'unavailable'
+                values=[
+                    {'mac':'02:00:00:00:00:01','ip':'192.0.2.99',
+                     'rssi_dbm':-60+i,'snr_db_reported':30+i},
+                    {'mac':'02:00:00:00:00:02','ip':'192.0.2.98',
+                     'rssi_dbm':None,'snr_db_reported':None},
+                ]
+                db.execute("INSERT INTO router_observations(source,ts,status,reason,payload) VALUES(?,?,?,?,?)",
+                           ('station_details',ts,status,None,json.dumps(values) if status=='ok' else None))
+            small=o.trend(db,'station_details',24,3)
+            self.assertTrue(small['truncated'])
+            self.assertEqual(len(small['points']),3)
+            self.assertEqual(small['points'][0]['record_count'],2)
+            self.assertIn('rssi_mean_dbm',small['points'][0])
+            self.assertNotIn('mac',json.dumps(small))
+            self.assertNotIn('192.0.2',json.dumps(small))
+            all_points=o.trend(db,'station_details',24)
+            self.assertFalse(all_points['truncated'])
+            self.assertEqual(len(all_points['points']),6)
+            self.assertIsNone(all_points['points'][2]['record_count'])
+            self.assertIsNone(all_points['points'][2].get('rssi_mean_dbm'))
+            self.assertEqual(all_points['points'][0]['rssi_mean_dbm'],-60)
+            self.assertEqual(all_points['metrics'][1]['unit'],'dBm')
+            self.assertEqual(o.trend(db,'upnp',24)['points'],[])
+            for source,hours,limit in [('unknown',24,400),('upnp',float('nan'),400),
+                                       ('upnp',0,400),('upnp',24,401),('upnp',24,0)]:
+                with self.assertRaises(ValueError):
+                    o.trend(db,source,hours,limit)
+        finally:
+            db.close()
+
     def test_empty_upnp_is_distinct_from_failed_schema(self):
         self.assertEqual(o.parse('upnp',js('stUpnpPortMapping',0,0,'',0,0,'','0.0.0.0','')),[])
         self.assertEqual(o.parse('upnp','function stUpnpPortMapping(){};'),[])

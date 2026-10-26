@@ -46,4 +46,22 @@ const radio={id:'radio_settings',data:[{interface:'wlan1',channel_reported:6,pow
 assert(view.highlights(radio).some(x=>x.value.includes('0%')),'zero transmit power setting must stay visible');
 assert(view.highlights(radio).some(x=>x.value==='Não'),'false radio configuration must stay visible');
 assert.equal(view.header(radio).count,1);
-console.log('Observability: 28/28 group coverage; KPI counts, distributions, readings, zero/false and timeline passed.');
+const trendPoints=[
+  {ts:'2026-10-26T20:00:00Z',status:'ok',record_count:0,rssi_mean_dbm:-65},
+  {ts:'2026-10-26T20:05:00Z',status:'ok',record_count:3,rssi_mean_dbm:-59},
+  {ts:'2026-10-26T20:10:00Z',status:'unavailable',record_count:null},
+  {ts:'2026-10-26T20:15:00Z',status:'ok',record_count:1,rssi_mean_dbm:null},
+  {ts:'2026-10-26T20:50:00Z',status:'ok',record_count:1,rssi_mean_dbm:-57}
+];
+const bands=view.trendSegments(trendPoints,'record_count',300);
+assert.equal(bands.length,3);
+assert.deepEqual(bands.map(a=>a.length),[2,1,1]);
+assert.equal(bands[0][0].value,0,'Real zero must be retained');
+assert.deepEqual(view.trendSegments(trendPoints,'rssi_mean_dbm').map(a=>a.length),[2,1]);
+const extent=view.trendDomain(bands,'registos');
+assert.equal(extent.min,0);
+assert.equal(extent.max,3);
+assert.equal(extent.total,4);
+assert.equal(view.trendDomain([],'registos'),null);
+assert(view.trendDomain([[{ts:0,value:-59}]],'dBm').min<-59);
+console.log('Observability: 28/28 source coverage, real trends, null gaps, numeric axes, zero/false and timeline passed.');

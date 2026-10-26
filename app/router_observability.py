@@ -366,6 +366,115 @@ def archive(db,source,after=0,limit=100):
     return {'source':source,'records':records,'has_more':more,'next_after':records[-1]['id'] if records else after}
 
 
+
+
+def archive_recent(db,source,before=0,limit=50):
+    """Newest observations by timestamp, using indexed source/time keysets."""
+    before=int(before);limit=int(limit)
+    if source not in SOURCES or not 0<=before<=2**63-1 or not 1<=limit<=100:
+        raise ValueError('observation_cursor')
+    if before:
+        marker=db.execute('SELECT ts,id FROM router_observations WHERE source=? AND id=?',
+                          (source,before)).fetchone()
+        if marker is None:
+            raise ValueError('observation_cursor')
+        sql='''SELECT * FROM router_observations
+            WHERE source=? AND (ts<? OR (ts=? AND id<?))
+            ORDER BY ts DESC,id DESC LIMIT ?'''
+        params=(source,marker['ts'],marker['ts'],marker['id'],limit+1)
+    else:
+        sql='''SELECT * FROM router_observations
+            WHERE source=? ORDER BY ts DESC,id DESC LIMIT ?'''
+        params=(source,limit+1)
+    records=[dict(row) for row in db.execute(sql,params)]
+    more=len(records)>limit
+    records=records[:limit]
+    for row in records:
+        raw=row.pop('payload')
+        row['data']=json.loads(raw) if raw is not None else None
+    return {'source':source,'records':records,'has_more':more,
+            'next_before':records[-1]['id'] if records else before,
+            'order':'newest_first'}
+
+
+# Single-source history is intentionally opt-in. This is not a full archive scan:
+# a bounded suffix is streamed from the indexed source/time range, projected to
+# numeric summaries, and never returns private row bodies or per-device identity.
+TREND_MAX_POINTS=400
+TREND_METRICS={
+    'station_details':(('record_count','Estações reportadas','registos'),
+                       ('rssi_mean_dbm','RSSI médio','dBm'),
+                       ('snr_mean_db','SNR médio','dB')),
+    'upnp':(('record_count','Mapeamentos UPnP','registos'),
+            ('enabled_count','Mapeamentos ativados','registos')),
+    'radios':(('record_count','Rádios reportados','registos'),
+              ('enabled_count','Rádios ativados','registos')),
+    'wps':(('record_count','Interfaces reportadas','registos'),
+           ('enabled_count','WPS ativado','registos')),
+    'file_services':(('record_count','Serviços reportados','registos'),
+                     ('enabled_count','Serviços ativados','registos')),
+    'client_details':(('record_count','Identidades reportadas','registos'),
+                      ('online_reported_count','Com estado Online reportado','registos')),
+}
+TREND_DEFAULT=(('record_count','Registos reportados','registos'),)
+
+
+def trend(db,source,hours=24,limit=TREND_MAX_POINTS):
+    """Latest bounded exact observations for one source, never an invented trend.
+
+    Returned points are capped; a truncated series never claims full-period
+    coverage. No raw configuration, MAC, IP, SSID, credentials or row bodies.
+    """
+    if source not in SOURCES:
+        raise ValueError('unknown_source')
+    hours=float(hours)
+    if not math.isfinite(hours) or not 0<hours<=24*366:
+        raise ValueError('observation_period')
+    limit=int(limit)
+    if not 1<=limit<=TREND_MAX_POINTS:
+        raise ValueError('trend_limit')
+    now=datetime.now(timezone.utc)
+    cutoff=datetime.fromtimestamp(now.timestamp()-hours*3600,timezone.utc).isoformat()
+    cursor=db.execute('''SELECT ts,status,reason,payload FROM router_observations
+        WHERE source=? AND ts>=? AND ts<=? ORDER BY ts DESC,id DESC LIMIT ?''',
+        (source,cutoff,now.isoformat(),limit+1))
+    points=[]
+    truncated=False
+    for record in cursor:
+        if len(points)>=limit:
+            truncated=True
+            break
+        point={'ts':record['ts'],'status':record['status'],'record_count':None}
+        if record['status']=='ok' and record['payload'] is not None:
+            rows=json.loads(record['payload'])
+            if isinstance(rows,list):
+                point['record_count']=len(rows)
+                if source in ('upnp','radios','wps','file_services'):
+                    point['enabled_count']=sum(row.get('enabled') is True for row in rows if isinstance(row,dict))
+                elif source=='client_details':
+                    point['online_reported_count']=sum(row.get('status_reported')=='Online' for row in rows if isinstance(row,dict))
+                elif source=='station_details':
+                    for key,field in (('rssi_mean_dbm','rssi_dbm'),('snr_mean_db','snr_db_reported')):
+                        values=[row[field] for row in rows if isinstance(row,dict)
+                                and type(row.get(field)) in (float,int) and math.isfinite(row[field])]
+                        point[key]=round(sum(values)/len(values),2) if values else None
+        points.append(point)
+    points.reverse()
+    metric_defs=TREND_METRICS.get(source,(('record_count',SOURCES[source][1]+' · registos','registos'),))
+    return {'source':source,'title':SOURCES[source][1],
+            'hours':hours,'limit':limit,'truncated':truncated,
+            'points':points,'metrics':[{'key':key,'label':label,'unit':unit} for key,label,unit in metric_defs],
+            'cadence_seconds':300,'from':points[0]['ts'] if points else None,
+            'to':points[-1]['ts'] if points else None,
+            'semantics':{'point':'raw collected snapshot, no interpolation; missing data remains null',
+                         'record_count':'number of records in this source, not unique physical devices',
+                         'window':'newest bounded suffix; truncated=true means some period observations were omitted',
+                         'online_reported_count':'router reported Online status, not verified Internet access',
+                         'rssi_mean_dbm':'mean of station RSSI values reported by AP, not antenna power',
+                         'snr_mean_db':'mean of SNR values reported by AP',
+                         'enabled_count':'count of config rows explicitly marked enabled, not a security score'}}
+
+
 def read_change(db,change_id):
     change_id=int(change_id)
     if not 1<=change_id<=2**63-1:raise ValueError('change_id')

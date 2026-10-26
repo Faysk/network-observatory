@@ -30,7 +30,15 @@ const server=http.createServer((req,res)=>{
  if(pathname==='/api/router/observability'){
   send(res,{sources:[{id:'radio_settings',title:'Configuração Wi-Fi',quality:'ok',attempt_status:'ok',collected_at:stamp,age_seconds:0,data:[{interface:'wlan1',width_policy_code:3,power_pct:0,description:'<img src=x onerror=alert(1)>'}]},{id:'upnp',title:'Mapeamentos UPnP',quality:'ok',attempt_status:'ok',collected_at:stamp,age_seconds:0,data:[]},{id:'ipv6',title:'Estado WAN IPv6',quality:'unavailable',attempt_status:'unavailable',reason:'transport',data:null}],changes:[{id:1,source:'upnp',previous_at:stamp,observed_at:stamp,crosses_gap:true,detail:{before_count:1,after_count:0,changed_fields:['external_port'],added:0,removed:1}}],unsupported:{wifi_logs:'Exportação indisponível na conta verificada.'},width_policies:{3:'Auto. 20/40/80 MHz'},poll_seconds:300},200,20);return;
  }
+ if(pathname==='/api/router/observability/trend'){
+  send(res,{source:'radio_settings',title:'Configuração Wi-Fi',hours:24,limit:400,truncated:false,cadence_seconds:300,
+    points:[{ts:new Date(Date.now()-900000).toISOString(),status:'ok',record_count:1},
+            {ts:new Date(Date.now()-600000).toISOString(),status:'unavailable',record_count:null},
+            {ts:new Date(Date.now()-300000).toISOString(),status:'ok',record_count:2}],
+    metrics:[{key:'record_count',label:'Registos reportados',unit:'registos'}]},200,20);return;
+ }
  if(pathname==='/api/router/observability/change'){send(res,{before:[{external_port:1234}],after:[]});return;}
+ if(pathname==='/api/router/observability/archive/recent'){send(res,{records:[{id:1,ts:stamp,status:'ok',data:[]}],has_more:false,next_before:1,order:'newest_first'});return;}
  if(pathname==='/api/router/observability/archive'){send(res,{records:[{id:1,ts:stamp,status:'ok',data:[]}],has_more:false,next_after:1});return;}
  if(pathname==='/api/router/clients'){counts.inventory++;send(res,{clients:inventorySmoke?fixtureClients():[]},200,80);return;}
  if(pathname==='/api/v1/overview'){
