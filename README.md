@@ -74,6 +74,8 @@ O repositório contém código e fixtures sintéticas. Bancos, inventário real,
 
 Licença MIT conforme `LICENSE`.
 
+Identificação da banda Wi-Fi por dispositivo, histórico de associação observada, limites da fonte e reprojeção do arquivo: [Wi-Fi por banda](docs/WIFI_BANDS.md).
+
 Personalização e associações explícitas: [CLI administrativa local](docs/DEVICE_PREFERENCES.md).
 
 Consultas de gráficos compactas no microSD, reconstrução segura e espelho S7: [read models](docs/READ_MODELS.md).
