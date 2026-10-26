@@ -38,6 +38,7 @@ const server=http.createServer((req,res)=>{
     metrics:[{key:'record_count',label:'Registos reportados',unit:'registos'}]},200,20);return;
  }
  if(pathname==='/api/router/observability/change'){send(res,{before:[{external_port:1234}],after:[]});return;}
+ if(pathname==='/api/router/observability/archive/recent'){send(res,{records:[{id:1,ts:stamp,status:'ok',data:[]}],has_more:false,next_before:1,order:'newest_first'});return;}
  if(pathname==='/api/router/observability/archive'){send(res,{records:[{id:1,ts:stamp,status:'ok',data:[]}],has_more:false,next_after:1});return;}
  if(pathname==='/api/router/clients'){counts.inventory++;send(res,{clients:inventorySmoke?fixtureClients():[]},200,80);return;}
  if(pathname==='/api/v1/overview'){
