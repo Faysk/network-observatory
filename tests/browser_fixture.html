@@ -29,10 +29,10 @@
   graph.click();
   await wait(()=>source.querySelector('.observation-trend-svg'),'real diagnostic graph');
   assert(source.querySelector('.observation-trend-svg').getAttribute('role')==='img','historical plot lacks accessible name');
-  archive.click();await wait(()=>source.textContent.includes('Primeiras 1 observações'),'observation archive');
+  archive.click();await wait(()=>source.textContent.includes('Últimas 1 observações'),'observation archive');
   const before=source;
   search.value='Configuração Wi-Fi';search.dispatchEvent(new Event('input',{bubbles:true}));
-  assert(before.isConnected&&before.open&&before.textContent.includes('Primeiras 1 observações'),'search destroyed opened history');
+  assert(before.isConnected&&before.open&&before.textContent.includes('Últimas 1 observações'),'search destroyed opened history');
   search.value='';search.dispatchEvent(new Event('input',{bubbles:true}));
   const changed=d.querySelector('[data-quick="changed"]');changed.click();
   assert(changed.getAttribute('aria-pressed')==='true'&&before.hidden,'change filter did not preserve and hide old source');
