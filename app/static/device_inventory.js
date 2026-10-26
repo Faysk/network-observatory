@@ -17,41 +17,23 @@
     return 'unknown';
   }
   // Speed belongs to the router's physical port, not to a bandwidth test.
-
   function connection(c,huawei,now=Date.now()){
-
     const kind=network(c);
-
     if(kind!=='wired')return {label:presence(c)==='online'&&Number.isFinite(c?.station?.rssi_dbm)?c.station.rssi_dbm+' dBm':'Sem dados',title:'Sinal Wi-Fi reportado pelo router'};
-
     const missing={label:'Velocidade indisponível',title:'Sem velocidade Ethernet atual e inequívoca para este aparelho'};
-
     const ts=Date.parse(huawei?.collected_at),seen=Date.parse(c?.last_seen);
-
     if(presence(c)!=='online'||huawei?.quality!=='ok'||!Number.isFinite(ts)||!Number.isFinite(seen)||now-ts>180000||now-ts< -5000||now-seen>180000||now-seen< -5000||Math.abs(ts-seen)>180000)return missing;
-
     const ports=new Set();
-
     for(const raw of Array.isArray(c.ports)?c.ports:[]){
-
       const match=/^(?:ETH:)?LAN([1-4])$/i.exec(raw)||/^InternetGatewayDevice\.LANDevice\.1\.LANEthernetInterfaceConfig\.([1-4])$/i.exec(raw);
-
       if(match)ports.add('lan'+match[1]);
-
     }
-
     if(ports.size!==1)return missing;
-
     const port=[...ports][0],value=huawei.interfaces?.[port],speed=value?.speed_mbps;
-
     if(value?.link_up!==true||![10,100,1000,2500,5000,10000].includes(speed))return missing;
-
     const label=speed>=1000?String(speed/1000).replace('.',',')+' Gb/s':speed+' Mb/s';
-
     return {label,title:port.toUpperCase()+' · Velocidade negociada da porta do router'+(value.duplex==='half'?' · Half duplex':value.duplex==='full'?' · Full duplex':'')+'. Não mede Internet nem ligações após switches.'+(speed<=100?' Uma ligação de 10/100 Mb/s pode indicar limitação do aparelho, porta, cabo ou configuração.':'')};
-
   }
-
   // Preserve original MAC/hostname for search and dossier, but avoid rendering
   // technical placeholders as though they were friendly product names.
   function meaningfulName(value){
