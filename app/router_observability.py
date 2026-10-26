@@ -369,15 +369,22 @@ def archive(db,source,after=0,limit=100):
 
 
 def archive_recent(db,source,before=0,limit=50):
-    """Page newest-to-oldest using indexed IDs; preserve original archive API."""
+    """Newest observations by timestamp, using indexed source/time keysets."""
     before=int(before);limit=int(limit)
     if source not in SOURCES or not 0<=before<=2**63-1 or not 1<=limit<=100:
         raise ValueError('observation_cursor')
     if before:
-        sql='SELECT * FROM router_observations WHERE source=? AND id<? ORDER BY id DESC LIMIT ?'
-        params=(source,before,limit+1)
+        marker=db.execute('SELECT ts,id FROM router_observations WHERE source=? AND id=?',
+                          (source,before)).fetchone()
+        if marker is None:
+            raise ValueError('observation_cursor')
+        sql='''SELECT * FROM router_observations
+            WHERE source=? AND (ts<? OR (ts=? AND id<?))
+            ORDER BY ts DESC,id DESC LIMIT ?'''
+        params=(source,marker['ts'],marker['ts'],marker['id'],limit+1)
     else:
-        sql='SELECT * FROM router_observations WHERE source=? ORDER BY id DESC LIMIT ?'
+        sql='''SELECT * FROM router_observations
+            WHERE source=? ORDER BY ts DESC,id DESC LIMIT ?'''
         params=(source,limit+1)
     records=[dict(row) for row in db.execute(sql,params)]
     more=len(records)>limit
@@ -388,7 +395,6 @@ def archive_recent(db,source,before=0,limit=50):
     return {'source':source,'records':records,'has_more':more,
             'next_before':records[-1]['id'] if records else before,
             'order':'newest_first'}
-
 
 
 # Single-source history is intentionally opt-in. This is not a full archive scan:
