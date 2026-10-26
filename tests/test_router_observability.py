@@ -60,7 +60,12 @@ class ObservationTests(unittest.TestCase):
         self.assertEqual(o.parse('dhcp',examples['dhcp'])[0]['lease_elapsed_reported_seconds'],100)
         # The two inventory branches must agree before deduplication.
         self.assertEqual(len(o.parse('client_details',examples['client_details']+examples['client_details'])),1)
-        with self.assertRaises(ValueError):o.parse('client_details',examples['client_details']+examples['client_details'].replace('Fixture phone','Other phone'))
+        conflicting=o.parse('client_details',examples['client_details']+examples['client_details'].replace('Fixture phone','Other phone'))[0]
+        self.assertIsNone(conflicting['name']);self.assertEqual(conflicting['conflicting_fields'],['name']);self.assertEqual(conflicting['reported_rows'],2)
+        self.assertEqual(conflicting['mac'],'02:00:00:00:00:01')
+        sentinel=examples['station_details'].replace('"-50"','"4294967295"').replace('"80"','"4294967295"')
+        station=o.parse('station_details',sentinel)[0]
+        self.assertIsNone(station['rssi_dbm']);self.assertIsNone(station['signal_quality_reported']);self.assertEqual(station['rx_link_mbps'],1000)
 
     def test_empty_upnp_is_distinct_from_failed_schema(self):
         self.assertEqual(o.parse('upnp',js('stUpnpPortMapping',0,0,'',0,0,'','0.0.0.0','')),[])

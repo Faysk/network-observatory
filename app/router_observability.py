@@ -41,6 +41,11 @@ SOURCES={
 }
 
 def utcnow():return datetime.now(timezone.utc).isoformat(timespec='seconds')
+
+class SchemaError(ValueError):
+    """Diagnostic metadata is static field names/counts, never returned values."""
+    def __init__(self,code,**context):
+        super().__init__(code);self.code=code;self.context=context
 def flag(v):return {'0':False,'1':True}.get(v.strip())
 def number(v):
     if not re.fullmatch(r'[+-]?\d+(?:\.\d+)?',v.strip()):return None
@@ -70,9 +75,9 @@ def rows(raw,name,arity,required=False):
         a=re.match(r'(\s*'+token+r'(?:\s*,\s*'+token+r')*\s*)\)',raw[m.end():])
         if not a:continue
         values=json.loads('['+re.sub(r'\\x([0-9a-fA-F]{2})',r'\\u00\1',a[1])+']')
-        if len(values) not in allowed:raise ValueError('schema_arity')
+        if len(values) not in allowed:raise SchemaError('schema_arity',constructor=name,expected=sorted(allowed),actual=len(values))
         result.append(values)
-    if len(result)>512 or (required and not result):raise ValueError('schema_rows')
+    if len(result)>512 or (required and not result):raise SchemaError('schema_rows',constructor=name,count=len(result))
     return result
 
 def parse(source,raw):
@@ -112,9 +117,11 @@ def parse(source,raw):
             identity=mac(r[2])
             if not identity:continue
             item={'mac':identity,'ip':private_ip(r[1]),'port_reported':label(r[3]),'ip_type_reported':enum(r[4]),'type_reported':label(r[5]),'status_reported':enum(r[6]),'port_type_reported':enum(r[7]),'time_reported':number(r[8]),'name':label(r[9]),'ipv4_enabled':flag(r[10]),'ipv6_enabled':flag(r[11]),'category_reported':label(r[12]),'alias':label(r[13]),'manual_type_reported':label(r[14]),'lease_remaining_seconds':number(r[15])}
-            if identity in seen and seen[identity]!=item:raise ValueError('ambiguous_inventory_branches')
-            seen[identity]=item
-        out=list(seen.values())
+            seen.setdefault(identity,[]).append(item)
+        for candidates in seen.values():
+            item=dict(candidates[0]);conflicts=sorted(k for k in item if any(row[k]!=item[k] for row in candidates[1:]))
+            for key in conflicts:item[key]=None
+            item.update(conflicting_fields=conflicts,reported_rows=len(candidates));out.append(item)
     elif source=='ipv6':
         for i,r in enumerate(rows(raw,'IPv6WanInfo',12,True)):
             out.append({'slot':i+1,'type_reported':enum(r[1]),'connection_state':enum(r[2]),'encapsulation_reported':enum(r[3]),'dns_present':bool(r[7]),'aftr_present':bool(r[8] or r[9]),'gateway_present':bool(r[10]),'uptime_seconds_reported':number(r[11])})
@@ -189,7 +196,10 @@ def parse(source,raw):
         for r in rows(raw,'stAssociatedDevice',29):
             if not mac(r[1]):continue
             item={'interface':interface(r[0]),'mac':mac(r[1]),'ip':private_ip(r[13]),'description':label(r[14]),'work_mode_reported':enum(r[9]),'resource_unit_reported':enum(r[20])}
-            item.update({key:number(r[i]) for i,key in numeric.items()});item.update({key:flag(r[i]) for i,key in flags.items()});out.append(item)
+            bounds={'rx_link_mbps':(0,100000),'tx_link_mbps':(0,100000),'rssi_dbm':(-200,0),'noise_dbm_reported':(-200,0),'snr_db_reported':(0,200),'signal_quality_reported':(0,100),'uptime_seconds_reported':(0,10**11)}
+            for i,key in numeric.items():
+                value=number(r[i]);low,high=bounds[key];item[key]=value if value is not None and low<=value<=high else None
+            item.update({key:flag(r[i]) for i,key in flags.items()});out.append(item)
     else:raise ValueError('unknown_source')
     validate_rows(source,out)
     return out
@@ -219,12 +229,14 @@ FIELDS['radio_settings']+=' pmf_policy_reported wifi_mode_reported beacon_type_r
 FIELDS['lan_settings']+=' pool_start_ip pool_end_ip'
 FIELDS['guest_network']='slot pool_start_ip pool_end_ip source_interface_ref'
 FIELDS['client_modes']='work_mode_reported ip mac'
+FIELDS['client_details']+=' conflicting_fields reported_rows'
 BOOLS=set('enabled hidden auto_channel wmm pmf beamforming ocac rssi_threshold_enabled scs periodic_auto_channel qhop service_enabled airtime_fairness channel_scope mu_mimo_enabled remote_restricted source_restricted ipv4_enabled ipv6_enabled dns_present aftr_present gateway_present present mlo_enabled safe_remove_reported dns_override_present server_present override_allowed managed other_config l3_enabled multicast_vlan_enabled share_all wan_enabled'.split())
 BOOLS.add('nat_enabled')
 BOOLS.update('power_save high_band supports_11k supports_11v dual_band twt_requester twt_responder bss_coloring ofdma mu_mimo supports_11w mimo supports_11r'.split())
 NUMBERS=set('slot channel_reported power_pct width_policy_code mcs_setting rssi_threshold_setting channel_plus_setting dtim_setting beacon_setting rts_threshold frag_threshold upload_limit_reported download_limit_reported lease_seconds_reported external_port internal_port lease_remaining_seconds lease_elapsed_reported_seconds time_reported uptime_seconds_reported preferred_seconds_reported valid_seconds_reported remaining_seconds_reported lease_duration_seconds_reported vlan_reported multicast_vlan_reported port user_count'.split())
 NUMBERS.update('lease_reported rx_link_mbps tx_link_mbps rssi_dbm noise_dbm_reported snr_db_reported signal_quality_reported'.split())
 NUMBERS.add('rekey_interval_reported')
+NUMBERS.add('reported_rows')
 LABELS=set('name alias description type_reported port_reported category_reported manual_type_reported'.split())
 def validate_rows(source,data):
     if source not in FIELDS or not isinstance(data,list) or len(data)>512:raise ValueError('observation_rows')
@@ -233,7 +245,8 @@ def validate_rows(source,data):
         if not isinstance(row,dict) or set(row)-allowed:raise ValueError('observation_fields')
         for k,v in row.items():
             if v is None:continue
-            if k in BOOLS:ok=type(v) is bool
+            if k=='conflicting_fields':ok=isinstance(v,list) and len(v)<=len(allowed) and all(isinstance(field,str) and field in allowed-{'conflicting_fields','reported_rows'} for field in v)
+            elif k in BOOLS:ok=type(v) is bool
             elif k in NUMBERS:ok=type(v) in (int,float) and math.isfinite(v) and abs(v)<=10**15
             elif k=='mac':ok=isinstance(v,str) and mac(v)==v
             elif k in ('ip','client_ip','pool_start_ip','pool_end_ip'):ok=isinstance(v,str) and private_ip(v)==v
@@ -245,7 +258,7 @@ def validate_rows(source,data):
             if ok and k=='port':ok=type(v) is int and 0<=v<=65535
             if ok and k in ('rssi_dbm','noise_dbm_reported'):ok=-200<=v<=0
             if ok and k in ('rx_link_mbps','tx_link_mbps'):ok=0<=v<=100000
-            if not ok:raise ValueError('observation_value')
+            if not ok:raise SchemaError('observation_value',field=k)
 
 def validate(bundle):
     if not isinstance(bundle,dict) or set(bundle)-set(SOURCES):raise ValueError('observation_sources')
@@ -281,6 +294,8 @@ def collect(adapter,conn):
         except (OSError,http.client.HTTPException):
             conn.close();result[source]={'collected_at':stamp,'status':'unavailable','reason':'transport','data':None}
         except Exception as exc:
+            if isinstance(exc,SchemaError):
+                print('Formato de fonte adicional:',json.dumps({'source':source,'code':exc.code,**exc.context},sort_keys=True),flush=True)
             reason='http' if exc.args==('router_http_error',) else 'schema'
             result[source]={'collected_at':stamp,'status':'unavailable','reason':reason,'data':None}
     adapter.next_observation_attempt=now+300

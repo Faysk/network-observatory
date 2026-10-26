@@ -16,7 +16,7 @@ O painel **Configuração e diagnóstico**, no fim de `/router/`, acrescenta 28 
 | Estações | Fonte alternativa de 29 campos: sinal, taxas PHY e capacidades; separada da fonte existente de 30 campos |
 | Hardware/serviços | Rádios/bandas, MLO configurado, componente Wi-Fi, estado USB, registo/estado de chamada, política de toque, FTP/SFTP/DLNA e NAT configurado por serviço WAN |
 
-`FIELDS`, em `app/router_observability.py`, define a allowlist aplicada também na ingestão. O inventário compara os ramos de 16/17 argumentos e só elimina duplicações quando concordam. Na fonte alternativa de endereços, interpreta somente os nove argumentos consumidos pela GUI; descarta os três extras sem contrato.
+`FIELDS`, em `app/router_observability.py`, define a allowlist aplicada também na ingestão. O inventário consolida os ramos de 16/17 argumentos por MAC: campos discrepantes ficam nulos, com `conflicting_fields` e contagem de linhas reportadas, sem escolher um ramo por suposição. Valores numéricos de estação fora do intervalo válido ficam nulos sem descartar as outras medições. Na fonte alternativa de endereços, interpreta somente os nove argumentos consumidos pela GUI; descarta os três extras sem contrato.
 
 ## Cadência e falhas
 
