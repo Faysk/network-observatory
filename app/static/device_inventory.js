@@ -16,13 +16,43 @@
     if(/eth|lanethernet|\blan[1-4]\b/i.test(ports))return 'wired';
     return 'unknown';
   }
+  // Preserve original MAC/hostname for search and dossier, but avoid rendering
+  // technical placeholders as though they were friendly product names.
+  function meaningfulName(value){
+    if(typeof value!=='string')return false;
+    const name=value.trim();
+    return name.length>0 && name.length<=120 &&
+      !/^(?:[\da-f]{2}[:-]){5}[\da-f]{2}$/i.test(name) &&
+      !/^[\da-f]{12}$/i.test(name) &&
+      !/^(?:wlan\d+|eth\d+|wifi|unknown|none|undefined|0|--|msft 5\.0|android[-_ ]?dhcp[\w.\-]*)$/i.test(name);
+  }
+  function suggestedName(c,category,connection){
+    const types=Array.isArray(c?.device_types)?c.device_types:[];
+    if(category==='game_console' && types.some(x=>typeof x==='string'&&/^PS5$/i.test(x.trim())))
+      return 'PlayStation 5 provável';
+    if(category==='android_device')return 'Equipamento Android provável';
+    if(category==='computer')return 'Computador provável';
+    const generic={
+      smartphone:'Smartphone provável',tablet:'Tablet provável',
+      laptop:'Notebook provável',desktop:'Computador provável',
+      game_console:'Console provável',robot_vacuum:'Aspirador robô provável',
+      smart_tv:'TV provável',streaming_box:'Reprodutor multimédia provável',
+      printer:'Impressora provável',camera:'Câmara provável',
+      network_device:'Equipamento de rede provável',iot:'Dispositivo IoT provável'
+    };
+    return generic[category] || (connection==='wifi'?'Dispositivo Wi-Fi não identificado':
+      connection==='wired'?'Dispositivo Ethernet não identificado':'Dispositivo não identificado');
+  }
   function prepare(c){
     const names=Array.isArray(c?.names)?c.names:[];
     const mac=String(c?.mac||'');
-    return {...c, id:mac.replaceAll(':',''),name:c?.presentation?.nickname||names[0]||mac,
-      effectiveCategory:c?.presentation?.category||c?.classification?.category||'unknown',
+    const connection=network(c);
+    const effectiveCategory=c?.presentation?.category||c?.classification?.category||'unknown';
+    const named=names.find(meaningfulName);
+    return {...c, id:mac.replaceAll(':',''),name:c?.presentation?.nickname||named||suggestedName(c,effectiveCategory,connection),
+      hasReportedName:Boolean(named),effectiveCategory,
       station:Array.isArray(c?.stations)?c.stations[0]||{}:{},
-      network:network(c),recent:c?.quality==='ok',presence:presence(c)};
+      network:connection,recent:c?.quality==='ok',presence:presence(c)};
   }
   function haystack(c){
     return [c.name,c.mac,c.last_seen,c.effectiveCategory,c.classification?.category,

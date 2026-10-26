@@ -46,3 +46,7 @@
 .device-explorer :is(button,input,select):focus-visible,.device-back-button:focus-visible{outline:2px solid #a0eddf;outline-offset:3px}
 @media(max-width:768px){.device-explorer-toolbar{grid-template-columns:repeat(2,minmax(0,1fr))}.device-explorer-search{grid-column:1/-1}.device-explorer-counters{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:400px){.device-explorer-toolbar{grid-template-columns:1fr}.device-explorer-counters{gap:6px}.device-explorer-counter{padding:10px}}
+
+/* Broad but informative categories: no assumed phone/desktop form factor. */
+.device-avatar.category-computer,.identity-symbol.category-computer{background:#1b3949;border-color:#3f6878;color:#a9e9fc}
+.device-avatar.category-android_device,.identity-symbol.category-android_device{background:#263f3a;border-color:#486a60;color:#b2eddc}

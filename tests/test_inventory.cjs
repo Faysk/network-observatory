@@ -20,4 +20,34 @@ const selected=inv.select([custom],{query:'<custom>',category:'tablet'});
 assert.equal(selected.length,1);assert.equal(selected[0].name,'A <custom> name');
 assert.equal(selected[0].classification.category,'unknown');
 assert.equal(inv.presence({...sample(1),quality:'stale',reported_status:'Online'}),'stale');
+// A type supplied by the router should produce a readable label even when the
+// hostname is only a raw MAC. The source values remain available in the object.
+const nameless=sample(1);
+nameless.names=[nameless.mac];
+nameless.device_types=['PS5'];
+nameless.classification={category:'game_console',confidence:'medium'};
+const inferred=inv.prepare(nameless);
+assert.equal(inferred.name,'PlayStation 5 provável');
+assert.deepEqual(inferred.names,[nameless.mac]);
+assert.equal(inferred.mac,nameless.mac);
+assert.equal(inv.select([nameless],{query:nameless.mac}).length,1);
+const android=sample(2);
+android.names=['wlan0'];
+android.device_types=['android-dhcp-8.0.0'];
+android.classification={category:'android_device',platform_family:'android',confidence:'low'};
+const guessed=inv.prepare(android);
+assert.equal(guessed.name,'Equipamento Android provável');
+assert.equal(guessed.hasReportedName,false);
+assert.deepEqual(guessed.names,['wlan0']);
+const unknown=sample(3);
+unknown.names=[unknown.mac];
+unknown.ports=['wlan0'];
+unknown.classification={category:'unknown',confidence:'unknown'};
+assert.equal(inv.prepare(unknown).name,'Dispositivo Wi-Fi não identificado');
+// Manual preferences outrank suggestions without modifying original identity.
+unknown.presentation={source:'manual',nickname:'Meu dispositivo',category:'tablet'};
+const saved=inv.prepare(unknown);
+assert.equal(saved.name,'Meu dispositivo');
+assert.equal(saved.effectiveCategory,'tablet');
+
 console.log('Inventory: 19/1000 identities, combined filters, stale semantics, ordering and manual precedence passed.');
