@@ -4,7 +4,7 @@ const {state:app,$,$$,esc,fmt,time,duration,retention,api,toast,tile,keyvals,emp
 const Inventory=window.FNOInventory;
 if(!Inventory)throw Error('FNO inventory selector missing');
 const state={id:null,period:'24h',tab:'overview',filter:'all',query:'',bundle:null,request:0,
-  category:'all',confidence:'all',vendor:'all',macKind:'all',status:'all',sort:'status',limit:40,
+  category:'all',confidence:'all',vendor:'all',macKind:'all',status:'all',band:'all',sort:'status',limit:40,
   expandedGroups:{online:true,offline:false,unknown:true,stale:false},explorerScrollTop:0};
 let lastHomeMarkup=null, lastInventorySignature=null, deviceController=null;
 function preserveFocus(root, update){
@@ -29,11 +29,11 @@ function identitySubtitle(c){
  return label+suffix;
 }
 function row(c){const link=Inventory.connection(c,app.status?.huawei),radio=Inventory.wifiContext(c,app.status?.huawei);return `<button class="device-list-row" data-open-device="${c.id}" aria-label="Ver detalhes e histórico de ${esc(c.name)}; ${esc(categoryLabel(c))}"><span class="device-label"><span class="device-avatar category-${categoryOf(c)}">${iconMarkup(c)}</span><span class="device-label-text"><strong>${esc(c.name)}</strong><small>${esc(identitySubtitle(c)+(c.network==='wifi'?' · '+radio.label:''))}</small></span></span><span class="device-col"><small>Estado</small><span class="device-status ${!c.recent||c.reported_status!=='Online'?'offline':''}">${esc(status(c))}</span></span><span class="device-col"><small>Interface</small><strong>${esc(c.network==='wired'?'Ethernet':c.network==='wifi'?(radio.band?'Wi-Fi · '+radio.band:'Wi-Fi · banda não identificada'):'Não determinada')}</strong></span><span class="device-col"><small>Sinal / ligação</small><strong title="${esc(link.title)}">${esc(link.label)}</strong></span><span class="device-col"><small>Último IP reportado</small><strong>${esc(c.ips?.[0]||'Sem dados')}</strong></span><svg class="ic device-row-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></button>`;}
-function filtered(){return Inventory.select(Array.isArray(app.clients)?app.clients:[],state);}
+function filtered(){const results=Inventory.select(Array.isArray(app.clients)?app.clients:[],state);return state.band==='all'?results:results.filter(c=>Inventory.wifiContext(c,app.status?.huawei).band===(state.band==='24'?'2,4 GHz':'5 GHz'));}
 function inventorySkeletons(){return window.FNO.loading?Array.from({length:4},()=>window.FNO.loading('Carregando dispositivo…',true)).join(''):empty('Carregando inventário…');}
 function renderList(){
  const list=filtered(),phase=app.resources?.inventory?.phase;
- const msg=list.length?'':state.query||state.filter!=='all'||state.category!=='all'||state.status!=='all'
+ const msg=list.length?'':state.query||state.filter!=='all'||state.category!=='all'||state.status!=='all'||state.band!=='all'
    ?'Nenhuma identidade corresponde à pesquisa ou aos filtros.'
    :phase==='error'?'O inventário está indisponível.'
    :phase==='loading'||!app.api?'A aguardar o primeiro inventário…'
@@ -61,6 +61,7 @@ function explorer(){
    <div class="device-explorer-toolbar">
      <label class="device-explorer-search"><span>Pesquisar identidades</span><input id="deviceExplorerSearch" type="search" autocomplete="off" placeholder="Nome, IP, MAC, fabricante…" value="${esc(state.query)}"></label>
      <label>Categoria<select id="deviceExplorerCategory">${categories.map(([v,label])=>option(v,label,state.category)).join('')}</select></label>
+     <label>Banda Wi-Fi<select id="deviceExplorerBand">${[['all','Todas'],['24','2,4 GHz'],['5','5 GHz']].map(([v,label])=>option(v,label,state.band)).join('')}</select></label>
      <label>Estado<select id="deviceExplorerStatus">${[['all','Todos os estados'],['online','Online reportado'],['offline','Offline reportado'],['unknown','Sem indicação'],['stale','Desatualizado']].map(([v,label])=>option(v,label,state.status)).join('')}</select></label>
      <label>Ordenar<select id="deviceExplorerSort">${[['status','Por estado'],['name','Nome'],['recent','Última observação'],['signal','Sinal Wi-Fi']].map(([v,label])=>option(v,label,state.sort)).join('')}</select></label>
    </div>
@@ -210,7 +211,7 @@ $('#deviceDetailContent').addEventListener('input',e=>{
  }
 });
 $('#deviceDetailContent').addEventListener('change',e=>{
- const field={deviceExplorerCategory:'category',deviceExplorerStatus:'status',deviceExplorerSort:'sort'}[e.target.id];
+ const field={deviceExplorerCategory:'category',deviceExplorerBand:'band',deviceExplorerStatus:'status',deviceExplorerSort:'sort'}[e.target.id];
  if(field){state[field]=e.target.value;state.limit=40;renderList();}
 });
 $('#deviceDetailContent').addEventListener('click',e=>{
@@ -232,10 +233,10 @@ $('#deviceDetailContent').addEventListener('click',e=>{
    return;
  }
  if(e.target.closest('[data-inv-reset]')){
-   Object.assign(state,{filter:'all',query:'',category:'all',confidence:'all',vendor:'all',macKind:'all',status:'all',sort:'status',limit:40});
+   Object.assign(state,{filter:'all',query:'',category:'all',confidence:'all',vendor:'all',macKind:'all',status:'all',band:'all',sort:'status',limit:40});
    if($('#deviceSearch'))$('#deviceSearch').value='';
    const search=$('#deviceExplorerSearch');if(search)search.value='';
-   ['Category','Status','Sort'].forEach(name=>{
+   ['Category','Band','Status','Sort'].forEach(name=>{
      const el=$('#deviceExplorer'+name);if(el)el.value=name==='Sort'?'status':'all';
    });
    $$('[data-device-filter]').forEach(el=>{
