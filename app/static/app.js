@@ -75,8 +75,21 @@ function resourceMarkup(name,label){
  const message=phase==='loading'?(meta.at?'Atualizando '+label+' · leitura anterior visível…':'A carregar '+label+'…'):phase==='error'?'Falha ao carregar '+label+'.':old?'Última leitura preservada, mas a atualização falhou.':phase==='empty'?'Não foram encontrados dados de '+label+'.':'';
  return message?'<span>'+esc(message)+'</span>'+(retry?' <button type="button" data-retry-resource="'+name+'">Tentar novamente</button>':''):'';
 }
+function blockFeedback(node,name){
+ if(!node)return;
+ const meta=state.resources[name],pending=meta.phase==='loading';
+ node.classList.add('resource-block');node.dataset.loadPhase=meta.phase;
+ node.dataset.firstLoad=String(pending&&!meta.at);node.setAttribute('aria-busy',String(pending));
+ let badge=node.querySelector(':scope > .block-load-status');
+ if(!badge){badge=document.createElement('span');badge.className='block-load-status';badge.setAttribute('aria-hidden','true');node.append(badge);}
+ const text=pending?(meta.at?'Atualizando…':'Carregando…'):meta.phase==='stale'?'Atualização falhou':meta.phase==='error'?'Falha ao carregar':'';
+ if(badge.textContent!==text)badge.textContent=text;
+ badge.hidden=!text;
+}
 function updateResourceRegions(){
+ $$('.telemetry-mini').forEach(node=>blockFeedback(node,'status'));
  document.body.dataset.initialLoading=String(!state.status&&state.resources.status.phase==='loading');
+ for(const [selector,name] of [['.metric-card[data-detail="traffic"]','status'],['.metric-card[data-detail="latency"]','status'],['.metric-card[data-detail="router"]','status'],['.metric-card[data-detail="devices"]','inventory'],['.hero-main','status'],['.hero-score','overview'],['.traffic-summary-values','status'],['.event-preview','overview'],['.signal-foot','status'],['.signal-main','overview'],['#deviceSection','inventory']])blockFeedback($(selector),name);
  for(const [name,id,label] of [['overview','#overviewState','histórico'],['inventory','#inventoryState','inventário']]){
    const el=$(id);if(!el)continue;
    const phase=state.resources[name].phase;
@@ -129,6 +142,20 @@ function toast(message){$('#toast').textContent=message;$('#toast').classList.ad
 function tile(label,value,unit='',foot=''){return `<article class="d-stat"><div class="d-stat-label">${esc(label)}</div><strong>${esc(value)} <small>${esc(unit)}</small></strong><span>${esc(foot)}</span></article>`;}
 function keyvals(rows){return `<div class="d-keyvals">${rows.map(([k,v])=>`<div class="d-keyval"><small>${esc(k)}</small><strong>${esc(v??'Sem dados')}</strong></div>`).join('')}</div>`;}
 function empty(message){return `<div class="d-fallback">${esc(message)}</div>`;}
+function seriesPath(series,key,period,x,y){
+ let path='',previous=null;
+ const resolution=Math.max(60,period.resolution_seconds||60),origin=Date.parse(period.from);
+ for(const p of series){
+   const value=p[key];if(!Number.isFinite(value)){previous=null;continue;}
+   const incomplete=!period.sampled_preview&&(p.max_gap_seconds>180||(p.values?.[key]?.sample_count<p.sample_count));
+   const gap=previous&&(period.sampled_preview?
+     Math.floor((Date.parse(p.timestamp)-origin)/(resolution*1000))-Math.floor((Date.parse(previous.timestamp)-origin)/(resolution*1000))>1:
+     Date.parse(p.timestamp)-Date.parse(previous.timestamp_end||previous.timestamp)>180000);
+   path+=`${previous&&!gap&&!incomplete?'L':'M'}${x(p.timestamp).toFixed(2)},${y(value).toFixed(2)} `;
+   previous=incomplete?null:p;
+ }
+ return path;
+}
 function chart(node,series,defs,period,selection){
  node.replaceChildren();const valid=series.filter(p=>defs.some(d=>Number.isFinite(p[d.key])));
  if(!valid.length){node.innerHTML=empty('Sem amostras desta métrica no período selecionado.');return;}
@@ -140,11 +167,13 @@ function chart(node,series,defs,period,selection){
  const x=t=>left+(Date.parse(t)-start)/Math.max(1,end-start)*(width-left-right), y=v=>top+(1-(v-low)/(high-low))*(height-top-bottom);
  let content='';for(let i=0;i<5;i++){const yy=top+i*(height-top-bottom)/4;content+=`<line x1="${left}" x2="${width-right}" y1="${yy}" y2="${yy}" stroke="#304558" stroke-dasharray="3 5"/><text x="${left-8}" y="${yy+4}" text-anchor="end" fill="#91a7ba" font-size="11">${fmt(high-i*(high-low)/4)}</text>`;}
  for(let i=0;i<4;i++){const t=start+i*(end-start)/3;content+=`<text x="${left+i*(width-left-right)/3}" y="${height-6}" text-anchor="${i===0?'start':i===3?'end':'middle'}" fill="#91a7ba" font-size="11">${esc(time(new Date(t).toISOString()))}</text>`;}
- defs.forEach(d=>{let path='',previous=null;series.forEach(p=>{const value=p[d.key];if(!Number.isFinite(value)){previous=null;return;}const incomplete=p.max_gap_seconds>180||(p.values?.[d.key]?.sample_count<p.sample_count);if(incomplete)previous=null;
- const gap=previous&&Date.parse(p.timestamp)-Date.parse(previous.timestamp_end||previous.timestamp)>180000;
- const xx=x(p.timestamp),yy=y(value/(d.scale||1));path+=`${previous&&!gap?'L':'M'}${xx.toFixed(2)},${yy.toFixed(2)} `;
- const extrema=p.values?.[d.key];if(extrema&&extrema.min!==extrema.max)content+=`<line x1="${xx}" x2="${xx}" y1="${y(extrema.min/(d.scale||1))}" y2="${y(extrema.max/(d.scale||1))}" stroke="${d.color}" opacity=".35"/>`;
- content+=`<circle cx="${xx}" cy="${yy}" r="2" fill="${d.color}"/>`;previous=incomplete?null:p;});content+=`<path d="${path}" fill="none" stroke="${d.color}" stroke-width="2.2"/>`;});
+ defs.forEach(d=>{
+   const path=seriesPath(series,d.key,period,x,v=>y(v/(d.scale||1)));
+   for(const p of series){const extrema=p.values?.[d.key];if(Number.isFinite(p[d.key])&&extrema&&extrema.min!==extrema.max)content+=`<line x1="${x(p.timestamp)}" x2="${x(p.timestamp)}" y1="${y(extrema.min/(d.scale||1))}" y2="${y(extrema.max/(d.scale||1))}" stroke="${d.color}" opacity=".35"/>`;}
+   // A genuinely isolated observation must remain visible without inventing a link.
+   for(const segment of path.matchAll(/M(-?[\d.]+),(-?[\d.]+)([^M]*)/g))if(!segment[3].includes('L'))content+=`<circle cx="${segment[1]}" cy="${segment[2]}" r="1.5" fill="${d.color}"/>`;
+   content+=`<path class="history-series-line" d="${path}" fill="none" stroke="${d.color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>`;
+ });
  node.innerHTML=`<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Histórico real com intervalos sem amostras">${content}<line class="inspect-line" x1="0" x2="0" y1="${top}" y2="${height-bottom}" stroke="#c5eadd" opacity="0"/><rect class="inspect-area" x="${left}" y="${top}" width="${width-left-right}" height="${height-top-bottom}" fill="transparent" tabindex="0" role="img" aria-label="Inspecionar amostras com setas esquerda e direita"/></svg>`;
  const area=$('.inspect-area',node),line=$('.inspect-line',node),svg=area.ownerSVGElement;let index=valid.length-1;
  node.classList.add('interactive-chart');
@@ -171,7 +200,7 @@ function chart(node,series,defs,period,selection){
  area.addEventListener('pointerleave',()=>{if(document.activeElement!==area)hide();});area.addEventListener('blur',hide);
  area.addEventListener('focus',()=>inspect(index));area.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','Home','End','Escape'].includes(e.key)){e.preventDefault();if(e.key==='Escape'){hide();return;}inspect(e.key==='Home'?0:e.key==='End'?valid.length-1:index+(e.key==='ArrowRight'?1:-1));}});
 }
-function appOnline(){const ready=['ready','empty'].includes(state.resources.inventory.phase);return state.api&&ready?state.clients.filter(c=>c.quality==='ok'&&c.reported_status==='Online').length:null;}
+function appOnline(){const meta=state.resources.inventory,ready=['ready','empty'].includes(meta.phase)||(meta.phase==='loading'&&meta.at!=null);return state.api&&ready?state.clients.filter(c=>c.quality==='ok'&&c.reported_status==='Online').length:null;}
 function renderHome(){
  const s=state.status,h=s?.huawei||{},current=state.api&&h.quality==='ok'&&fresh(h.collected_at),m=current?h.metrics||{}:{},o=state.overview;
  const probe=s?.probe,probeCurrent=state.api&&probe&&fresh(probe.ts);
@@ -193,12 +222,19 @@ function renderHome(){
  const online=appOnline();
  $('[data-metric="devices"]').textContent=fmt(online,0);$('[data-metric="devices"]').nextElementSibling.textContent='/ '+(state.resources.inventory.at!=null?state.clients.length:'—');
  $('.traffic-summary-values').innerHTML=`<div><span class="label-with-dot"><i class="series-dot download"></i> RX REPORTADO</span><strong>${fmt(counters?.rx_bytes==null?null:counters.rx_bytes/2**30,2)} <small>GiB</small></strong></div><div><span class="label-with-dot"><i class="series-dot upload"></i> TX REPORTADO</span><strong>${fmt(counters?.tx_bytes==null?null:counters.tx_bytes/2**30,2)} <small>GiB</small></strong></div><div class="mini-time">${esc(time(h.collected_at))}</div>`;
- if(o)chart($('#overviewChart'),o.series,[{key:'wan_rx_bytes',label:'RX acumulado',color:'#c3a4ff',scale:2**30,unit:'GiB'},{key:'wan_tx_bytes',label:'TX acumulado',color:'#69e9dc',scale:2**30,unit:'GiB'}],o.period);
+ if(o)chart($('#overviewChart'),o.series,[{key:'wan_rx_bytes',label:'RX acumulado',color:'#c3a4ff',scale:2**30,unit:'GiB'},{key:'wan_tx_bytes',label:'TX acumulado',color:'#69e9dc',scale:2**30,unit:'GiB'}],{...o.period,sampled_preview:!!o.summary?.sampled});
  $('.axis-row').hidden=true;
  $('.signal-foot').innerHTML=`<span>TCP gateway<strong>${fmt(probeCurrent?probe.router_ms:null)} ms</strong></span><span>Perda ICMP<strong>Sem dados</strong></span><span>DNS<strong>Sem dados</strong></span>`;
  const events=o?.events||[];$('.nav-number').textContent=String(events.length);
  $('.event-preview').innerHTML=events.length?events.slice(0,3).map(e=>`<button class="event-line event-open" data-event="${e.id}"><span class="event-dot ${e.severity==='warning'||e.severity==='critical'?'amber-dot':'mint-dot'}"></span><span><strong>${esc(e.title)}</strong><small>${esc(time(e.ts))}</small></span><span class="event-pill neutral-pill">${esc(e.severity)}</span></button>`).join(''):empty('Sem eventos registados nesta janela.');
- ['traffic','latency','router','devices'].forEach(metric=>{const c=config[metric],rows=c.probes?o?.probes:o?.series,node=$('#spark-'+metric);node.replaceChildren();const vals=(rows||[]).map(r=>r[c.a]).filter(Number.isFinite);if(vals.length<2)return;let min=Math.min(...vals),max=Math.max(...vals),previous=null;const points=(rows||[]).map(r=>{const v=r[c.a];if(!Number.isFinite(v)){previous=null;return '';}const gap=!previous||Date.parse(r.timestamp)-Date.parse(previous.timestamp_end||previous.timestamp)>180000||r.max_gap_seconds>180;const x=(Date.parse(r.timestamp)-Date.parse(o.period.from))/Math.max(1,Date.parse(o.period.to)-Date.parse(o.period.from))*108;const segment=`${gap?'M':'L'}${x},${24-(v-min)/Math.max(1,max-min)*20}`;previous=r;return segment;}).join(' ');node.innerHTML=`<path d="${points}" fill="none" stroke="${metric==='latency'?'#d0a7ff':'#7de6c4'}" stroke-width="2"/>`;});
+ ['traffic','latency','router','devices'].forEach(metric=>{
+   const c=config[metric],rows=c.probes?o?.probes:o?.series,node=$('#spark-'+metric);node.replaceChildren();
+   const vals=(rows||[]).map(r=>r[c.a]).filter(Number.isFinite);if(vals.length<2)return;
+   const min=Math.min(...vals),max=Math.max(...vals),period={...o.period,sampled_preview:!!o.summary?.sampled};
+   const points=seriesPath(rows,c.a,period,t=>(Date.parse(t)-Date.parse(period.from))/Math.max(1,Date.parse(period.to)-Date.parse(period.from))*108,v=>24-(v-min)/Math.max(1,max-min)*20);
+   node.innerHTML=`<path d="${points}" fill="none" stroke="${metric==='latency'?'#d0a7ff':'#7de6c4'}" stroke-width="2"/>`;
+ });
+ updateResourceRegions();
  document.dispatchEvent(new CustomEvent('fno:update'));
 }
 async function refresh(){
@@ -322,5 +358,5 @@ function init(){
  document.addEventListener('keydown',e=>{if(!$('#sheetLayer').hidden){if(e.key==='Escape')closeSheet();else trap(e,$('#detailSheet'));}});
  const tick=()=>$('#clock').textContent=new Date().toLocaleTimeString('pt-PT',{hour:'2-digit',minute:'2-digit'});tick();setInterval(tick,15000);refresh();setInterval(()=>{if(!document.hidden)refresh();},60000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh();});
 }
-window.FNO={state,$,$$,esc,fmt,time,duration,retention,api,toast,tile,keyvals,empty,chart,download,trap};
+window.FNO={state,$,$$,esc,fmt,time,duration,retention,api,toast,tile,keyvals,empty,chart,download,trap,blockFeedback};
 init();
