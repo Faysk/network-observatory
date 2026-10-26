@@ -82,6 +82,8 @@ Identificação da banda Wi-Fi por dispositivo, histórico de associação obser
 
 Personalização e associações explícitas: [CLI administrativa local](docs/DEVICE_PREFERENCES.md).
 
+Configuração e diagnóstico: [28 fontes Huawei com resumos visuais, distribuições, valores por registo e histórico de alterações](docs/OBSERVABILITY_VISUALS.md).
+
 Consultas de gráficos compactas no microSD, reconstrução segura e espelho S7: [read models](docs/READ_MODELS.md).
 
 Matriz individual de contratos e desempenho, relatórios e comparação por versão: [guia de testes de performance](docs/PERFORMANCE_TESTS.md).
