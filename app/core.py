@@ -102,6 +102,8 @@ def init_db():
           revision INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL);
 
         """)
+        from .read_models import init_router
+        init_router(db)
 
 
 def emit(db, severity, category, title, detail="", source="collector"):
@@ -234,11 +236,14 @@ def put_huawei_sample(data, historical=False):
             return
         sample_id=db.execute('INSERT INTO huawei_samples(ts,payload) VALUES(?,?)',
                    (data['collected_at'], json.dumps(data, allow_nan=False))).lastrowid
+        from .read_models import project_overview, project_client, safe_project
+        safe_project(db,project_overview,sample_id,data['collected_at'],data)
         for client in data.get('clients',[]):
             previous=db.execute('SELECT ts,payload FROM router_client_samples WHERE mac=? AND ts<? ORDER BY ts DESC,id DESC LIMIT 1',(client['mac'],data['collected_at'])).fetchone()
             observation={**client,'stations':[s for s in data.get('stations',[]) if s.get('mac')==client['mac']]}
-            db.execute('INSERT INTO router_client_samples(sample_id,ts,mac,payload) VALUES(?,?,?,?)',
-                       (sample_id,data['collected_at'],client['mac'],json.dumps(observation,allow_nan=False)))
+            observation_id=db.execute('INSERT INTO router_client_samples(sample_id,ts,mac,payload) VALUES(?,?,?,?)',
+                       (sample_id,data['collected_at'],client['mac'],json.dumps(observation,allow_nan=False))).lastrowid
+            safe_project(db,project_client,observation_id,data['collected_at'],client['mac'],observation)
             if previous and not historical:
                 old=json.loads(previous['payload']).get('reported_status','Unknown')
                 gap=(datetime.fromisoformat(data['collected_at'])-datetime.fromisoformat(previous['ts'])).total_seconds()

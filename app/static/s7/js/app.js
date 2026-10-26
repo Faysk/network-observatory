@@ -44,8 +44,52 @@ function ic(n){return `<svg class="icon" width="18" height="18" viewBox="0 0 24 
 function readSetting(k,fallback){try{return localStorage.getItem('s7_'+k)??fallback}catch{return fallback}}
 function saveSetting(k,v){try{localStorage.setItem('s7_'+k,String(v))}catch{}}
 function emptySnapshot(){return {timestamp:null,device:{name:'Servidor S7',os:null,uptimeSec:null},cpu:{usagePercent:null,frequencyMHz:null,temperatureC:null,coresPercent:[]},memory:{totalMB:null,usedMB:null,cachedMB:null,swapMB:null},battery:{levelPercent:null,status:null,temperatureC:null,voltageMV:null,currentMA:null,health:null,plugged:null},network:{interface:null,ip:null,ssid:null,signalDbm:null,linkMbps:null,rxMbps:null,txMbps:null,latencyMs:null,connected:null},storage:[],services:[],events:[],diagnostics:{},availability:{}};}
-const state={page:'overview',range:readSetting('range','24h'),theme:readSetting('theme','dark'),pref:'auto',motion:readSetting('motion','on')!=='off',historyTimes:{},lastPage:null,mode:'offline',snapshot:emptySnapshot(),paused:false,tick:0,filter:'all',search:'',history:{},fetching:false};
-let chartID=0;let chartRegistry=new Map();
+const state={page:'overview',range:readSetting('range','24h'),theme:readSetting('theme','dark'),pref:'auto',motion:readSetting('motion','on')!=='off',historyTimes:{},lastPage:null,mode:'offline',snapshot:emptySnapshot(),paused:false,tick:0,filter:'all',search:'',history:{},historyStatus:{},fetching:false,explorerLimit:48};
+let chartID=0;let chartRegistry=new Map(),previousChartSelection=new Map();
+const HISTORY_TTL_MS=60000,HISTORY_CACHE_LIMIT=28;
+const historyFlights=new Map();
+const requiredHistory={overview:['cpu','memory','rx','tx'],performance:['cpu','memory'],network:['rx','tx'],storage:['storage'],battery:['battery','temp']};
+const currentHistoryKeys=()=>new Set((requiredHistory[state.page]||[]).map(metric=>metric+':'+state.range));
+let renderQueued=false;
+let lastRenderedRange=state.range;
+function scheduleRender(){
+ if(renderQueued)return;
+ renderQueued=true;
+ // rAF batches writes in visible tabs; timeout fallback handles throttled/headless frames.
+ let flushed=false;
+ const flush=()=>{if(flushed)return;flushed=true;renderQueued=false;render()};
+ if(typeof requestAnimationFrame==='function')requestAnimationFrame(flush);
+ else setTimeout(flush,0);
+ setTimeout(flush,80);
+}
+function historyAnnouncement(message){const el=$('#history-announcement');if(el)el.textContent=message;}
+function cacheHistory(key,values){
+ state.history[key]=values;state.historyTimes[key]=Date.now();
+ const keys=Object.keys(state.historyTimes);
+ if(keys.length>HISTORY_CACHE_LIMIT){
+   keys.sort((a,b)=>state.historyTimes[a]-state.historyTimes[b]);
+   let count=keys.length;
+   for(const evicted of keys){
+     if(count<=HISTORY_CACHE_LIMIT)break;
+     if(historyFlights.has(evicted)&&evicted!==key)continue;
+     delete state.history[evicted];delete state.historyTimes[evicted];delete state.historyStatus[evicted];
+     count--;
+   }
+ }
+}
+function cancelUnusedHistory(){
+ const needed=currentHistoryKeys();
+ for(const [key,entry] of historyFlights){
+   if(!needed.has(key)){entry.controller.abort();historyFlights.delete(key);
+     if(state.historyStatus[key]?.phase==='loading')delete state.historyStatus[key];}
+ }
+}
+function historyState(metric,range=state.range){
+ const key=metric+':'+range,meta=state.historyStatus[key];
+ if(meta)return meta.phase;
+ if(Array.isArray(state.history[key]))return state.history[key].length?'success':'empty';
+ return 'idle';
+}
 function toast(text){const el=document.createElement('div');el.className='toast';el.textContent=text;$('#toast-region').appendChild(el);setTimeout(()=>el.remove(),3900);}
 function setTheme(t){state.theme=t;saveSetting('theme',t);document.body.dataset.theme=t;$('#theme-toggle').innerHTML=ic(t==='dark'?'sun':'moon')}
 function setNav(){ $('#main-nav').innerHTML=nav.map(([key,label,icon],idx)=>`<button type="button" class="nav-item ${state.page===key?'active':''}" data-nav="${key}" aria-current="${state.page===key?'page':'false'}">${ic(icon)}<span>${label}</span>${idx===0?'<span class="nav-trailing">⌘1</span>':''}</button>`).join('')}
@@ -68,14 +112,21 @@ function chart(metric,opts={}){
   const vals=state.mode!=='demo'?(state.history[`${metric}:${state.range}`]||null):Demo.series(metric,state.range);
   const secondary=opts.secondary;
   const vals2=secondary?(state.mode!=='demo'?(state.history[`${secondary}:${state.range}`]||null):Demo.series(secondary,state.range)):null;
-  if(!vals&&state.fetching)return '<div class="history-loading"><div></div><span>Carregando histórico…</span></div>';
-  if(!vals||vals.length<2||!vals.some(p=>p.value!=null))return `<div class="empty" style="min-height:180px;display:grid;place-items:center;text-align:center">O gráfico aparece assim que houver amostras suficientes neste período.</div>`;
+  const phases=[metric,...(secondary?[secondary]:[])].map(name=>state.mode==='demo'?'success':historyState(name));
+  const phase=phases.includes('error')?'error':phases.includes('stale')?'stale':phases.includes('loading')?'loading':phases[0];
+  const old=phase==='stale',pending=phase==='loading',failed=phase==='error';
+  const retry=`<button type="button" class="link-button history-retry" data-retry-history="${esc([metric,...(secondary?[secondary]:[])].join(','))}">Tentar novamente</button>`;
+  const message=failed?'Não foi possível carregar este histórico.':old?'Falha ao atualizar — exibindo apenas a última série válida deste período.':pending?'Carregando histórico deste período…':phase==='empty'?'Não há amostras registradas neste período.':'Ainda não há amostras suficientes neste período.';
+  const statusLabel=(pending||failed||old)?`<div class="history-state history-${phase}" role="status">${pending?'<span class="history-spinner" aria-hidden="true"></span>':''}<span>${message}</span>${failed||old?retry:''}</div>`:'';
+  if(!vals||vals.length<2||!vals.some(p=>p.value!=null)){
+    return `<div class="history-region" data-history-region="${esc(metric)}" aria-busy="${pending}">${statusLabel||`<div class="empty history-empty" role="status">${message}</div>`}</div>`;
+  }
   if(['rx','tx','temp'].includes(metric)){const all=[...vals,...(vals2||[])].map(p=>p.value).filter(v=>v!=null&&Number.isFinite(v));if(all.length){max=Math.max(metric==='temp'?1:.01,...all)*1.15;if(metric==='temp')min=Math.max(0,Math.min(...all)-3);}}
-  chartRegistry.set(id,{values:vals,secondaryValues:vals2,secondaryName:secondary,min,max,unit:cfg.unit,metric,x0,y0,w,h});
+  chartRegistry.set(id,{values:vals,secondaryValues:vals2,secondaryName:secondary,min,max,unit:cfg.unit,metric,x0,y0,w,h,selectedIndex:previousChartSelection.get(state.page+':'+state.range+':'+metric+':'+(secondary||''))});
   const d1=curve(vals,x0,y0,w,h,min,max), d2=vals2&&vals2.length>=2?curve(vals2,x0,y0,w,h,min,max):null;
   const color=cfg.color==='accent'?'var(--accent)':cfg.color==='blue'?'var(--blue)':cfg.color==='orange'?'var(--orange)':'var(--violet)';
   const gradId=`fade${id}`;
-  return `<div class="chart-holder ${opts.tall?'tall':''} ${opts.compact?'compact':''}" data-chart="${id}" tabindex="0" role="group" aria-label="Gráfico ${esc(metric)} para ${state.range}. Use as setas para inspecionar os pontos.">
+  return `<div class="history-region" data-history-region="${esc(metric)}" aria-busy="${pending}">${statusLabel}<div class="chart-holder ${opts.tall?'tall':''} ${opts.compact?'compact':''}" data-chart="${id}" tabindex="0" role="group" aria-label="Gráfico ${esc(metric)} para ${state.range}. Use as setas para inspecionar os pontos.">
     <svg viewBox="0 0 ${wid} ${hei}" preserveAspectRatio="none" role="img" aria-label="Série temporal ${esc(metric)}">
       <defs><linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${color}" stop-opacity=".18"/><stop offset="100%" stop-color="${color}" stop-opacity="0"/></linearGradient></defs>
       ${[0,.25,.5,.75,1].map(f=>`<line x1="${x0}" x2="${x0+w}" y1="${y0+h*(1-f)}" y2="${y0+h*(1-f)}" stroke="var(--border)" stroke-dasharray="3 6" stroke-width="1"/><text x="${x0-9}" y="${y0+h*(1-f)+3}" text-anchor="end" fill="var(--muted)" font-size="10">${num(min+(max-min)*f,max<1?2:max<10?1:0)}</text>`).join('')}
@@ -86,7 +137,7 @@ function chart(metric,opts={}){
       <rect x="${x0}" y="${y0}" width="${w}" height="${h}" fill="transparent" />
     </svg>
     <div class="axis-foot"><span>${labelTime(vals[0].time)}</span><span>${labelTime(vals[Math.floor(vals.length*.33)].time)}</span><span>${labelTime(vals[Math.floor(vals.length*.66)].time)}</span><span>${labelTime(vals[vals.length-1].time)}</span></div>
-  </div>`;
+  </div></div>`;
 }
 function labelTime(ts){let opt=state.range==='1a'?{month:'short',year:'2-digit'}:['7d','30d'].includes(state.range)?{day:'2-digit',month:'short'}:{hour:'2-digit',minute:'2-digit'};return new Date(ts).toLocaleString('pt-BR',opt)}
 function card(content,cols='span-6',extra=''){return `<section class="card ${cols} ${extra}">${content}</section>`}
@@ -134,20 +185,188 @@ ${graphCard('Ocupação do armazenamento interno','Percentual utilizado · perí
 function renderBattery(){const b=state.snapshot.battery;return `${head('Energia, em tempo real.','Carga, alimentação e temperatura medidas no aparelho.',btn('Atualizar','refresh','refresh'))}<div class="cards-grid">${present(b.levelPercent)?card(`<div class="card-pad">${cardTitle('Bateria','Estado reportado pelo sistema')}<div class="battery-display">${batteryRing(b.levelPercent)}<div class="battery-details"><div class="big-number">${esc(translate(b.status))}</div><p>${esc(b.plugged||'Alimentação reportada pelo sistema')}</p></div></div>${row('Temperatura da bateria',b.temperatureC,'°C')}${row('Tensão',b.voltageMV,'mV')}${row('Saúde reportada',translate(b.health))}${row('Tecnologia',rawMetric('battery.technology'))}</div>`,'span-5'):''}${graphCard('Histórico de carga','Percentual da bateria no período','battery',null,'span-7')}${present(b.temperatureC)?graphCard('Temperatura da bateria','Leitura do sensor da bateria · °C','temp',null,'span-12'):''}</div>${sourceSection(['battery','power'],'Leituras originais de energia')}`;}
 function renderServices(){const s=state.snapshot,d=s.diagnostics||{},p=rawMetric('process.status')||{},io=rawMetric('process.io')||{};return `${head('O monitor, por dentro.','Consumo da aplicação e saúde da coleta no próprio celular.')}<div class="cards-grid">${statCard('CPU DO MONITOR',d.processCpuPercent,'%','100% equivale a um núcleo','cpu')}${statCard('MEMÓRIA DO MONITOR',d.processRssMB,'MiB','Memória residente do Python','database')}${statCard('TEMPO DE COLETA',d.samplingMs,'ms','Amostragem do hardware, sem commit','clock')}${statCard('THREADS',p.Threads,'','Threads do processo','layers')}${card(`<div class="card-pad">${cardTitle('Instância do servidor','Processo que fornece o painel')}${s.services.map(serviceItem).join('')}${row('Supervisor',d.supervisor)}${row('PID',d.pid)}${row('Tempo em execução',duration(d.processUptimeSec))}${row('Agente de hardware',agentLabel(d.agentStatus))}${row('Idade do agente na coleta',d.agentAgeSeconds,'s')}${row('Janela da CPU',d.cpuWindowSec,'s')}${row('Arquivo pendente de envio',d.pendingSamples)}</div>`,'span-6')}${card(`<div class="card-pad">${cardTitle('Leituras & gravações','Contadores do próprio processo')}${row('Bytes lidos por chamadas',present(io.rchar)?bytes(io.rchar):null)}${row('Bytes enviados por chamadas',present(io.wchar)?bytes(io.wchar):null)}${row('Leituras de armazenamento',present(io.read_bytes)?bytes(io.read_bytes):null)}${row('Escritas de armazenamento',present(io.write_bytes)?bytes(io.write_bytes):null)}${row('Pico de memória residente',present(p.VmHWM)?bytes(p.VmHWM*1024):null)}${row('Trocas de contexto voluntárias',p.voluntary_ctxt_switches)}${row('Trocas de contexto involuntárias',p.nonvoluntary_ctxt_switches)}</div>`,'span-6')}</div>${diagnostics()}${sourceSection(['process'],'Contadores completos do monitor')}`;}
 function explorerEntries(){const q=(state.search||'').toLocaleLowerCase('pt-BR');return availableEntries().filter(([k,m])=>(state.filter==='all'||k.split('.')[0]===state.filter)&&(!q||(k+' '+sourceLabel(k)+' '+m.source+' '+JSON.stringify(m.value)).toLocaleLowerCase('pt-BR').includes(q)));}
-function explorerResults(){const e=explorerEntries();return `<div class="explorer-count">${e.length} ${e.length===1?'leitura':'leituras'}${state.search?(e.length===1?' encontrada':' encontradas'):(e.length===1?' disponível':' disponíveis')}</div><div class="source-grid">${sourceCards(e)}</div>${e.length?'':'<div class="search-empty">'+ic('search')+'<h3>Nenhuma leitura corresponde à busca</h3><p>Tente outro termo ou escolha outro grupo.</p><button class="btn" data-clear-search>Limpar filtros</button></div>'}`;}
+function explorerResults(){const e=explorerEntries();return `<div class="explorer-count">${e.length} ${e.length===1?'leitura':'leituras'}${state.search?(e.length===1?' encontrada':' encontradas'):(e.length===1?' disponível':' disponíveis')}</div><div class="source-grid">${sourceCards(e.slice(0,state.explorerLimit))}</div>${e.length>state.explorerLimit?`<button type="button" class="btn explorer-more" data-explorer-more>Carregar mais (${e.length-state.explorerLimit} restantes)</button>`:''}${e.length?'':'<div class="search-empty">'+ic('search')+'<h3>Nenhuma leitura corresponde à busca</h3><p>Tente outro termo ou escolha outro grupo.</p><button class="btn" data-clear-search>Limpar filtros</button></div>'}`;}
 function renderActivity(){const groups=[...new Set(availableEntries().map(([k])=>k.split('.')[0]))];return `${head('Tudo que o S7 conta.','Busque uma leitura, abra seus contadores e confira a origem de cada valor.',btn('Exportar tudo','download','export="snapshot"'))}<div class="explorer-toolbar"><label class="explorer-search">${ic('search')}<input id="metric-search" type="search" placeholder="Buscar memória, CPU, interface, contador…" aria-label="Pesquisar leituras" value="${esc(state.search)}"></label><select class="select" id="metric-group" aria-label="Grupo de telemetria"><option value="all">Todos os grupos</option>${groups.map(k=>`<option value="${esc(k)}" ${state.filter===k?'selected':''}>${esc(groupNames[k]||k)}</option>`).join('')}</select></div><div id="explorer-results">${explorerResults()}</div>`;}
 function renderSettings(){const s=state.snapshot,d=s.diagnostics||{};return `${head('Seu painel. Seu jeito.','Preferências deste navegador e informações do servidor.')}<div class="cards-grid">${card(`<div class="card-pad">${cardTitle('Aparência & atualização')}<div class="setting-row"><div class="setting-copy"><strong>Tema escuro</strong><small>O tema é salvo somente neste navegador.</small></div><button class="toggle ${state.theme==='dark'?'on':''}" data-theme-switch aria-label="Alternar tema" aria-pressed="${state.theme==='dark'}"><span></span></button></div><div class="setting-row"><div class="setting-copy"><strong>Animações suaves</strong><small>Transições leves. A preferência de movimento reduzido do sistema também é respeitada.</small></div><button class="toggle ${state.motion?'on':''}" data-motion aria-label="Alternar animações" aria-pressed="${state.motion}"><span></span></button></div><div class="setting-row"><div class="setting-copy"><strong>Atualização da tela</strong><small>Consulta a cada 30 s; coleta do servidor a cada 60 s.</small></div><button class="btn" data-pause>${state.paused?'Retomar':'Pausar'}</button></div></div>`,'span-6')}${card(`<div class="card-pad">${cardTitle('Inventário observado')}${row('Modelo',s.device.model)}${row('Arquitetura',s.device.architecture)}${row('Android',s.device.os)}${row('Firmware',s.device.firmware)}${row('Kernel',s.details?.inventory?.kernelRelease)}${row('Python',s.details?.inventory?.pythonVersion)}${row('Dados',d.dataLocation)}${row('Leituras disponíveis',availableEntries().length)}${row('Retenção','Sem expiração automática')}</div>`,'span-6')}</div>`;}
 function diagnostics(){const d=state.snapshot.diagnostics||{};return `<div class="cards-grid">${card(`<div class="card-pad">${cardTitle('Tempo da coleta','Duração medida no servidor')}${row('Amostragem do hardware',d.samplingMs,'ms')}${row('Gravação anterior do hardware',d.historyWriteMs,'ms')}${row('Leitura indexada do SQLite',d.sqliteReadMs,'ms')}${row('Coleta do router',d.routerCollectionMs,'ms')}</div>`,'span-6')}${d.apiSamples>0?card(`<div class="card-pad">${cardTitle('Resposta das APIs','Últimas '+num(d.apiSamples)+' requisições · sem trânsito pela rede')}${row('Tempo médio',d.apiMeanMs,'ms')}${row('Percentil 95',d.apiP95Ms,'ms')}${(d.slowRoutes||[]).map(r=>row(r.path,r.ms,'ms')).join('')}</div>`,'span-6'):''}</div>`;}
 const pageFunctions={overview:renderOverview,performance:renderPerformance,network:renderNetwork,storage:renderStorage,battery:renderBattery,services:renderServices,activity:renderActivity,settings:renderSettings};
 function detailedErrorBanner(){const d=state.snapshot.diagnostics||{};return d.historyError?'<div class="callout warning" role="alert"><strong>Falha ao gravar o histórico no cartão: '+esc(d.historyError)+'</strong></div>':d.lowStorage?.length?'<div class="callout warning" role="alert">Pouco espaço disponível: '+esc(d.lowStorage.join(', '))+'.</div>':'';}
-function render(){const focused=document.activeElement,focusId=['metric-search','metric-group'].includes(focused?.id)?focused.id:null,selection=focusId==='metric-search'?[focused.selectionStart,focused.selectionEnd]:null;$('#tooltip').hidden=true;const main=$('#main-content'),opened=Array.from(main.querySelectorAll?.('details[open][data-source],details.source-section[open]')||[]).map(el=>el.dataset.source||'section');const entering=state.lastPage!==state.page;if(entering)state.enteredAt=Date.now();state.lastPage=state.page;document.body.dataset.motion=state.motion?'on':'off';main.classList?.remove('page-enter');chartRegistry.clear();chartID=0;setNav();$('#breadcrumb-current').textContent=nav.find(n=>n[0]===state.page)?.[1]||'Visão geral';const connected=state.mode==='real',demo=state.mode==='demo';const label=demo?'DEMONSTRAÇÃO':connected?'API LOCAL':state.snapshot.timestamp?'LEITURA ANTIGA':'SEM CONEXÃO';const note=demo?'Dados fictícios selecionados explicitamente.':connected?`Coleta no celular · ${dateTime(state.snapshot.timestamp)}`:state.snapshot.timestamp?`Última leitura: ${dateTime(state.snapshot.timestamp)}. Dados abaixo estão desatualizados.`:'Aguardando a primeira medição real. Sensores indisponíveis permanecem sem dados.';$('#main-content').innerHTML=`<div class="freshness-bar ${connected?'':'is-stale'}" role="status"><span class="freshness-dot"></span><strong>${connected?'Conectado ao S7':label}</strong><span>${state.snapshot.timestamp?'Amostra de '+esc(prettyTime(state.snapshot.timestamp)):'Conectando ao servidor…'}</span><button class="link-button" data-refresh>Atualizar ${ic('refresh')}</button></div>${detailedErrorBanner()}`+pageFunctions[state.page]();
-if(focusId){const field=$('#'+focusId);field?.focus({preventScroll:true});if(selection&&field?.setSelectionRange)field.setSelectionRange(...selection);}
-if(state.motion&&(entering||Date.now()-(state.enteredAt||0)<700))main.classList?.add('page-enter');for(const el of Array.from(main.querySelectorAll?.('details[data-source],details.source-section')||[])){if(opened.includes(el.dataset.source||'section'))el.open=true;}$('#mode-chip').className='mode-chip '+(connected?'real':'demo');$('#mode-chip').innerHTML=`<span></span> ${label}`;$('#sidebar-status').textContent=label;$('#sidebar-status-note').textContent=note;$('#footer-update').textContent=state.snapshot.timestamp?`Amostra: ${dateTime(state.snapshot.timestamp)}`:'Sem amostra';$('#clock-label').textContent=prettyTime(new Date());}
-function route(key){if(!pageFunctions[key])return;state.page=key;state.search='';state.filter='all';$('#sidebar').classList.remove('open');$('#sidebar-scrim').classList.remove('visible');render();if(state.mode!=='demo'){loadHistory().then(render).catch(()=>{});}window.scrollTo({top:0,behavior:state.motion&&!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches?'smooth':'auto'});$('#main-content').focus({preventScroll:true})}
-async function fetchJson(url,timeout=4000){const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),timeout);try{const r=await fetch(url,{signal:controller.signal,cache:'no-store',credentials:'same-origin'});if(!r.ok)throw Error('HTTP '+r.status);return await r.json()}finally{clearTimeout(timer)}}
+// Reconcile existing nodes on the same screen instead of destroying controls and SVGs.
+// A detached template is only used to calculate the next structure. Expanded details,
+// focused controls and chart elements keep their identity unless their type changes.
+function patchNode(oldNode,newNode){
+ if(oldNode.isEqualNode?.(newNode))return;
+ if(oldNode.nodeType!==newNode.nodeType||oldNode.nodeName!==newNode.nodeName){oldNode.replaceWith(newNode.cloneNode(true));return;}
+ if(oldNode.nodeType===3||oldNode.nodeType===8){if(oldNode.nodeValue!==newNode.nodeValue)oldNode.nodeValue=newNode.nodeValue;return;}
+ if(oldNode.nodeType!==1)return;
+ const keepOpen=oldNode.tagName==='DETAILS'&&oldNode.open;
+ for(const attr of Array.from(oldNode.attributes)){
+   if(keepOpen&&attr.name==='open')continue;
+   if(!newNode.hasAttribute(attr.name))oldNode.removeAttribute(attr.name);
+ }
+ for(const attr of Array.from(newNode.attributes)){
+   if(attr.name==='open'&&oldNode.tagName==='DETAILS')continue;
+   if(oldNode.getAttribute(attr.name)!==attr.value)oldNode.setAttribute(attr.name,attr.value);
+ }
+ if(oldNode.matches?.('.source-body')&&oldNode.closest('details')?.open&&!newNode.innerHTML)return;
+ if(oldNode.matches?.('input,textarea,select')&&oldNode===document.activeElement){
+   // Never overwrite live keyboard input when polling.
+   return;
+ }
+ const before=Array.from(oldNode.childNodes),after=Array.from(newNode.childNodes);
+ for(let i=0;i<after.length;i++){
+   if(before[i])patchNode(before[i],after[i]);
+   else oldNode.appendChild(after[i].cloneNode(true));
+ }
+ for(let i=after.length;i<before.length;i++)before[i].remove();
+}
+function updateMain(main,html,entering){
+ if(entering||!document.createElement){main.innerHTML=html;return;}
+ const template=document.createElement('template');template.innerHTML=html;
+ const from=Array.from(main.childNodes),to=Array.from(template.content.childNodes);
+ for(let i=0;i<to.length;i++){if(from[i])patchNode(from[i],to[i]);else main.appendChild(to[i].cloneNode(true));}
+ for(let i=to.length;i<from.length;i++)from[i].remove();
+}
+function updateChrome(){
+ const connected=state.mode==='real',demo=state.mode==='demo';
+ const label=demo?'DEMONSTRAÇÃO':connected?'API LOCAL':state.snapshot.timestamp?'LEITURA ANTIGA':'SEM CONEXÃO';
+ const note=demo?'Dados fictícios selecionados explicitamente.':connected?`Coleta no celular · ${dateTime(state.snapshot.timestamp)}`:state.snapshot.timestamp?`Última leitura: ${dateTime(state.snapshot.timestamp)}. Dados abaixo estão desatualizados.`:'Aguardando a primeira medição real. Sensores indisponíveis permanecem sem dados.';
+ $('#mode-chip').className='mode-chip '+(connected?'real':'demo');
+ $('#mode-chip').innerHTML=`<span></span> ${label}`;
+ $('#sidebar-status').textContent=label;$('#sidebar-status-note').textContent=note;
+ $('#footer-update').textContent=state.snapshot.timestamp?`Amostra: ${dateTime(state.snapshot.timestamp)}`:'Sem amostra';
+ $('#breadcrumb-current').textContent=nav.find(n=>n[0]===state.page)?.[1]||'Visão geral';
+ const bar=$('#main-content').querySelector?.('.freshness-bar');
+ if(bar){
+   bar.classList.toggle('is-stale',!connected);
+   const strong=bar.querySelector('strong'),timestamp=bar.querySelector('span:nth-of-type(2)');
+   if(strong)strong.textContent=connected?'Conectado ao S7':label;
+   if(timestamp)timestamp.textContent=state.snapshot.timestamp?'Amostra de '+prettyTime(state.snapshot.timestamp):'Conectando ao servidor…';
+ }
+ for(const refresh of Array.from($('#main-content').querySelectorAll?.('[data-refresh]')||[])){
+   refresh.disabled=state.fetching;
+   refresh.setAttribute('aria-busy',String(state.fetching));
+ }
+}
+function render(){
+ const main=$('#main-content'),entering=state.lastPage!==state.page;
+ const oldSelections=new Map();
+ for(const entry of chartRegistry.values())if(entry.selectedIndex!=null)
+   oldSelections.set((state.lastPage||state.page)+':'+lastRenderedRange+':'+entry.metric+':'+(entry.secondaryName||''),entry.selectedIndex);
+ previousChartSelection=oldSelections;
+ const focused=document.activeElement,selection=focused?.id==='metric-search'?[focused.selectionStart,focused.selectionEnd]:null;
+ const opened=Array.from(main.querySelectorAll?.('details[open][data-source],details.source-section[open]')||[]).map(el=>el.dataset.source||'section');
+ state.lastPage=state.page;lastRenderedRange=state.range;document.body.dataset.motion=state.motion?'on':'off';
+ main.classList?.remove('page-enter');chartRegistry.clear();chartID=0;
+ if(entering)setNav();
+ const connected=state.mode==='real',demo=state.mode==='demo';
+ const label=demo?'DEMONSTRAÇÃO':connected?'API LOCAL':state.snapshot.timestamp?'LEITURA ANTIGA':'SEM CONEXÃO';
+ const html=`<div class="freshness-bar ${connected?'':'is-stale'}" role="status"><span class="freshness-dot"></span><strong>${connected?'Conectado ao S7':label}</strong><span>${state.snapshot.timestamp?'Amostra de '+esc(prettyTime(state.snapshot.timestamp)):'Conectando ao servidor…'}</span><button type="button" class="link-button" data-refresh ${state.fetching?'disabled aria-busy="true"':'aria-busy="false"'}>Atualizar ${ic('refresh')}</button></div>${detailedErrorBanner()}`+pageFunctions[state.page]();
+ updateMain(main,html,entering);
+ if(entering&&state.motion&&!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches)main.classList?.add('page-enter');
+ if(entering)for(const el of Array.from(main.querySelectorAll?.('details[data-source],details.source-section')||[]))if(opened.includes(el.dataset.source||'section'))el.open=true;
+ if(!entering&&selection&&focused?.isConnected&&focused.setSelectionRange)focused.setSelectionRange(...selection);
+ // Expanded sensor bodies were generated lazily; keep the disclosure open and
+ // update only its own reading instead of deleting it during DOM reconciliation.
+ for(const details of Array.from(main.querySelectorAll?.('details[data-source][open]')||[])){
+   const body=details.querySelector('.source-body');
+   if(body&&!body.contains(document.activeElement)){
+     const fresh=sourceDetail(details.dataset.source);
+     if(body.innerHTML!==fresh)body.innerHTML=fresh;
+   }
+ }
+ updateChrome();
+ for(const [id,entry] of chartRegistry)if(entry.selectedIndex!=null){
+   const holder=main.querySelector?.('[data-chart="'+id+'"]');
+   if(holder)inspectChart(holder,undefined,undefined,entry.selectedIndex);
+ }
+}
+function route(key){
+ if(!pageFunctions[key])return;
+ if(state.page!==key){state.page=key;}
+ state.search='';state.filter='all';state.explorerLimit=48;
+ $('#sidebar').classList.remove('open');$('#sidebar-scrim').classList.remove('visible');
+ cancelUnusedHistory();
+ const pending=state.mode!=='demo'?loadHistory():null;
+ render();if(pending)pending.catch(()=>{});
+ window.scrollTo?.({top:0,behavior:state.motion&&!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches?'smooth':'auto'});
+ $('#main-content').focus({preventScroll:true});
+}
+async function fetchJson(url,timeout=4000,externalSignal){
+ const controller=new AbortController();
+ const relay=()=>controller.abort();
+ if(externalSignal){if(externalSignal.aborted)controller.abort();else externalSignal.addEventListener('abort',relay,{once:true});}
+ const timer=setTimeout(()=>controller.abort(),timeout);
+ try{const r=await fetch(url,{signal:controller.signal,cache:'no-store',credentials:'same-origin'});
+   if(!r.ok)throw Error('HTTP '+r.status);return await r.json();
+ }finally{clearTimeout(timer);externalSignal?.removeEventListener('abort',relay);}
+}
 function validSnapshot(s){return !!(s&&s.timestamp&&Number.isFinite(Date.parse(s.timestamp))&&s.device&&s.cpu&&Array.isArray(s.cpu.coresPercent)&&s.memory&&s.battery&&s.network&&Array.isArray(s.storage)&&Array.isArray(s.services)&&Array.isArray(s.events));}
-async function checkAPI(showMessage=false){if(state.fetching)return;if(state.pref==='demo'){state.mode='demo';state.snapshot=Demo.demoSnapshot(state.tick);state.history={};render();return;}state.fetching=true;try{const result=await fetchJson('/api/host/snapshot',8000);if(!validSnapshot(result))throw Error('Aguardando amostra');if(!state.snapshot.timestamp)state.lastPage=null;state.snapshot=result;state.mode=result.quality==='stale'||Date.now()-Date.parse(result.timestamp)>180000||Date.parse(result.timestamp)-Date.now()>5000?'offline':'real';render();await loadHistory();if(showMessage)toast('Leitura recebida da API local.');}catch(err){if(state.mode==='demo'){state.snapshot=emptySnapshot();state.history={};}state.mode='offline';if(showMessage)toast('API indisponível; nenhuma simulação ativada.');}finally{state.fetching=false;render()}}
-async function loadHistory(){if(state.mode==='demo')return;const required={overview:['cpu','memory','rx','tx'],performance:['cpu','memory'],network:['rx','tx'],storage:['storage'],battery:['battery','temp']}[state.page]||[];const range=state.range;await Promise.all(required.map(async metric=>{const key=`${metric}:${range}`;if(Date.now()-(state.historyTimes[key]||0)<60000)return;try{const result=await fetchJson(`/api/host/history?metric=${encodeURIComponent(metric)}&range=${encodeURIComponent(range)}`,8000);if(!Array.isArray(result)||!result.every(p=>(p.value===null||typeof p.value==='number'&&Number.isFinite(p.value))&&Number.isFinite(new Date(p.time).getTime())))throw Error('Série inválida');state.history[key]=result.map(p=>({time:new Date(p.time).getTime(),value:p.value}));state.historyTimes[key]=Date.now();}catch{/* Preserve previous history during temporary failures. */}}))}
+async function checkAPI(showMessage=false){
+ if(state.fetching||state.paused||document.hidden)return;
+ if(state.pref==='demo'){
+   if(!Demo){if(showMessage)toast('Dados de demonstração indisponíveis.');return;}
+   cancelAllHistory();state.mode='demo';state.snapshot=Demo.demoSnapshot(state.tick);state.history={};state.historyTimes={};state.historyStatus={};render();return;
+ }
+ state.fetching=true;updateChrome();
+ try{
+   const result=await fetchJson('/api/host/snapshot',8000);
+   if(!validSnapshot(result))throw Error('Aguardando amostra');
+   if(!state.snapshot.timestamp)state.lastPage=null;
+   const nextMode=result.quality==='stale'||Date.now()-Date.parse(result.timestamp)>180000||Date.parse(result.timestamp)-Date.now()>5000?'offline':'real';
+   const snapshotChanged=JSON.stringify(state.snapshot)!==JSON.stringify(result)||state.mode!==nextMode;
+   state.snapshot=result;state.mode=nextMode;
+   if(snapshotChanged)render();else updateChrome();
+   await loadHistory();
+   if(showMessage)toast('Leitura recebida da API local.');
+ }catch(err){
+   if(state.mode==='demo'){state.snapshot=emptySnapshot();state.history={};state.historyStatus={};}
+   const changed=state.mode!=='offline';state.mode='offline';
+   if(changed)render();else updateChrome();
+   if(showMessage)toast('API indisponível; nenhuma simulação ativada.');
+ }finally{state.fetching=false;updateChrome();}
+}
+function cancelAllHistory(){
+ for(const [,flight] of historyFlights)flight.controller.abort();
+ historyFlights.clear();
+ for(const [key,meta] of Object.entries(state.historyStatus))if(meta.phase==='loading'){
+   if(Array.isArray(state.history[key]))state.historyStatus[key]={phase:'stale'};
+   else delete state.historyStatus[key];
+ }
+}
+function requestHistory(metric,range,{force=false}={}){
+ const key=metric+':'+range,time=Date.now();
+ if(historyFlights.has(key))return historyFlights.get(key).promise;
+ if(!force&&time-(state.historyTimes[key]||0)<HISTORY_TTL_MS)return Promise.resolve(false);
+ const controller=new AbortController();
+ state.historyStatus[key]={phase:'loading',startedAt:time};
+ const request=(async()=>{
+   try{
+     const result=await fetchJson('/api/host/history?metric='+encodeURIComponent(metric)+'&range='+encodeURIComponent(range),15000,controller.signal);
+     if(controller.signal.aborted)return false;
+     if(!Array.isArray(result)||!result.every(p=>(p.value===null||typeof p.value==='number'&&Number.isFinite(p.value))&&Number.isFinite(new Date(p.time).getTime())))throw Error('Série inválida');
+     const series=result.map(p=>({time:new Date(p.time).getTime(),value:p.value}));
+     cacheHistory(key,series);
+     state.historyStatus[key]={phase:series.length?'success':'empty',updatedAt:Date.now()};
+     if(currentHistoryKeys().has(key)){historyAnnouncement('Histórico de '+metric+' em '+range+' atualizado.');scheduleRender();}
+     return true;
+   }catch(err){
+     if(controller.signal.aborted)return false;
+     state.historyStatus[key]={phase:Array.isArray(state.history[key])?'stale':'error',error:String(err.message||err),updatedAt:Date.now()};
+     if(currentHistoryKeys().has(key)){historyAnnouncement('Falha ao atualizar histórico de '+metric+' em '+range+'.');scheduleRender();}
+     return false;
+   }finally{if(historyFlights.get(key)?.controller===controller)historyFlights.delete(key);}
+ })();
+ historyFlights.set(key,{promise:request,controller});
+ return request;
+}
+async function loadHistory(opts={}){
+ if(state.mode==='demo'||state.paused||document.hidden)return false;
+ const metrics=requiredHistory[state.page]||[],range=state.range;
+ if(!metrics.length)return false;
+ const jobs=metrics.map(metric=>requestHistory(metric,range,opts));
+ return Promise.all(jobs);
+}
 function csvEscape(v){return '"'+String(v??'').replace(/"/g,'""')+'"'}
 function saveBlob(filename,mime,data){const blob=new Blob([data],{type:mime}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500)}
 function exportData(type){const snap=state.snapshot,name=`s7-${type}-${new Date().toISOString().slice(0,10)}`;if(type==='events'){const lines=[['tipo','titulo','detalhe','minutos_relativos'].map(csvEscape).join(',')].concat((snap.events||[]).map(e=>[e.type,e.title,e.detail,e.at].map(csvEscape).join(',')));saveBlob(name+'.csv','text/csv;charset=utf-8','\ufeff'+lines.join('\n'));return}const payload={NOTICE:state.mode==='demo'?'DADOS FICTÍCIOS. NÃO SÃO MEDIÇÕES DO APARELHO.':state.mode==='offline'?'API indisponível; última amostra ou campos sem dados.':'Dados fornecidos pela API local.',source:state.mode,exportedAt:new Date().toISOString(),type,data:type==='snapshot'?snap:type==='network'?snap.network:type==='storage'?snap.storage:snap.services};saveBlob(name+'.json','application/json;charset=utf-8',JSON.stringify(payload,null,2));toast('Exportação gerada no navegador.')}
@@ -155,19 +374,21 @@ function copyString(str){navigator.clipboard?.writeText(str).then(()=>toast('Com
 $('#main-content').addEventListener('click',async e=>{
  const t=e.target.closest('button');if(!t)return;
  if(t.dataset.nav)route(t.dataset.nav);
- else if(t.dataset.range){state.range=t.dataset.range;saveSetting('range',state.range);if(state.mode!=='demo')await loadHistory();render()}
- else if('refresh' in t.dataset)await checkAPI(true);
+ else if(t.dataset.range){if(state.range===t.dataset.range)return;state.range=t.dataset.range;saveSetting('range',state.range);cancelUnusedHistory();const pending=loadHistory();render();await pending}
+ else if('retryHistory' in t.dataset){const metrics=t.dataset.retryHistory.split(',').filter(metric=>(requiredHistory[state.page]||[]).includes(metric));if(!metrics.length)return;const pending=Promise.all(metrics.map(metric=>requestHistory(metric,state.range,{force:true})));render();await pending}
+  else if('refresh' in t.dataset)await checkAPI(true);
  else if(t.dataset.export)exportData(t.dataset.export);
  else if('motion' in t.dataset){state.motion=!state.motion;saveSetting('motion',state.motion?'on':'off');render()}
- else if('clearSearch' in t.dataset){state.search='';state.filter='all';render()}
- else if(t.dataset.filter){state.filter=t.dataset.filter;render()}
- else if('pause' in t.dataset){state.paused=!state.paused;render();toast(state.paused?'Atualização visual pausada.':'Atualização visual retomada.')}
+ else if('clearSearch' in t.dataset){state.search='';state.filter='all';state.explorerLimit=48;render()}
+  else if('explorerMore' in t.dataset){state.explorerLimit+=48;$('#explorer-results').innerHTML=explorerResults()}
+ else if(t.dataset.filter){state.filter=t.dataset.filter;state.explorerLimit=48;render()}
+ else if('pause' in t.dataset){state.paused=!state.paused;if(state.paused)cancelAllHistory();else{const pending=loadHistory();pending.catch(()=>{});}render();toast(state.paused?'Atualização visual pausada.':'Atualização visual retomada.')}
  else if('themeSwitch' in t.dataset){setTheme(state.theme==='dark'?'light':'dark');render()}
  else if('copyCommand' in t.dataset)copyString('cd ~/s7-server/app/dashboard\npython -m http.server 9090 --bind 0.0.0.0');
 });
 $('#main-content').addEventListener('toggle',e=>{const el=e.target;if(el.matches?.('details[data-source]')&&el.open){const body=el.querySelector('.source-body');if(body&&!body.innerHTML)body.innerHTML=sourceDetail(el.dataset.source);}},true);
-$('#main-content').addEventListener('change',e=>{if(e.target.id==='metric-group'){state.filter=e.target.value;$('#explorer-results').innerHTML=explorerResults();return;}if(e.target.id==='source-select'){state.pref=e.target.value;saveSetting('source',state.pref);checkAPI(true)}});
-$('#main-content').addEventListener('input',e=>{if(e.target.id==='metric-search'){state.search=e.target.value;$('#explorer-results').innerHTML=explorerResults()}});
+$('#main-content').addEventListener('change',e=>{if(e.target.id==='metric-group'){state.filter=e.target.value;state.explorerLimit=48;$('#explorer-results').innerHTML=explorerResults();return;}if(e.target.id==='source-select'){state.pref=e.target.value;saveSetting('source',state.pref);checkAPI(true)}});
+$('#main-content').addEventListener('input',e=>{if(e.target.id==='metric-search'){state.search=e.target.value;state.explorerLimit=48;$('#explorer-results').innerHTML=explorerResults()}});
 function inspectChart(el,clientX,clientY,requestedIndex){const r=chartRegistry.get(el.dataset.chart);if(!r)return;const rect=el.getBoundingClientRect();let idx=requestedIndex;if(idx==null){const fraction=cap(((clientX-rect.left)/rect.width-r.x0/700)/(r.w/700),0,1),target=r.values[0].time+fraction*(r.values.at(-1).time-r.values[0].time);idx=0;for(let i=1;i<r.values.length;i++)if(Math.abs(r.values[i].time-target)<Math.abs(r.values[idx].time-target))idx=i;}idx=cap(idx,0,r.values.length-1);r.selectedIndex=idx;const data=r.values[idx],tip=$('#tooltip'),cross=el.querySelector('.plot-crosshair');if(!data||data.value==null){tip.hidden=true;cross?.setAttribute('visibility','hidden');return;}const x=r.x0+(data.time-r.values[0].time)/Math.max(1,r.values.at(-1).time-r.values[0].time)*r.w,y=r.y0+r.h-(cap(data.value,r.min,r.max)-r.min)/(r.max-r.min)*r.h;if(cross){cross.setAttribute('visibility','visible');const line=cross.querySelector('line'),circle=cross.querySelector('circle');line.setAttribute('x1',x);line.setAttribute('x2',x);circle.setAttribute('cx',x);circle.setAttribute('cy',y);}const labels={cpu:'CPU',memory:'RAM',rx:'Recebido',tx:'Enviado',temp:'Bateria',battery:'Carga',storage:'Ocupação'};let secondary='';if(r.secondaryValues?.length){let point=r.secondaryValues.reduce((a,b)=>Math.abs(b.time-data.time)<Math.abs(a.time-data.time)?b:a);if(point.value!=null&&Math.abs(point.time-data.time)<180000)secondary='<strong>'+esc(labels[r.secondaryName]||r.secondaryName)+': '+num(point.value,2)+' '+r.unit+'</strong>';}tip.hidden=false;tip.innerHTML='<strong>'+esc(labels[r.metric]||r.metric)+': '+num(data.value,2)+' '+r.unit+'</strong>'+secondary+'<small>'+dateTime(data.time)+'</small>';tip.style.left=cap((clientX??rect.left+rect.width/2)+15,8,window.innerWidth-185)+'px';tip.style.top=Math.max(10,(clientY??rect.top+70)-80)+'px';}
 $('#main-content').addEventListener('pointermove',e=>{const el=e.target.closest('[data-chart]');if(el)inspectChart(el,e.clientX,e.clientY)});
 $('#main-content').addEventListener('click',e=>{const el=e.target.closest('[data-chart]');if(el)inspectChart(el,e.clientX,e.clientY)});
@@ -183,6 +404,6 @@ function updateClock(){$('#clock-label').textContent=prettyTime(new Date())}
 setTheme(state.theme);render();updateClock();setInterval(()=>{if(!document.hidden)updateClock()},1000);
 setInterval(()=>{if(state.paused||state.mode!=='demo')return;state.tick++;state.snapshot=Demo.demoSnapshot(state.tick);if(document.activeElement?.id==='event-search')return;render()},4000);
 setInterval(()=>{if(state.paused||state.pref==='demo'||document.hidden)return;checkAPI(false)},30000);
-document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!state.paused)checkAPI(false)});
+document.addEventListener('visibilitychange',()=>{if(document.hidden)cancelAllHistory();else if(!state.paused)checkAPI(false)});
 checkAPI(false);
 })();
