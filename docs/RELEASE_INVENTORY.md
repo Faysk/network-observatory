@@ -25,3 +25,17 @@ Fonte prevista: [IEEE Registration Authority, public listings](https://standards
 ## Publicação e reversão
 
 Persistentes permanecem no microSD. Antes de migrar: parar apenas o serviço da aplicação, gerar backup SQLite consistente, testar restauração em cópia isolada, guardar hashes e código anterior. Migração idempotente adiciona duas tabelas de metadados; nenhum ALTER/UPDATE/DELETE nas observações. Rollback de código preserva tabelas extras e dados recentes; não restaurar banco antigo sobre a coleta atual. Não habilitar cache interno; exigir >=2 GiB disponíveis no interno. Aguardar intervalo de autenticação de 60 s antes de retomar o coletor Huawei.
+
+
+## Resultado da publicação — 26/10/2026
+
+Publicação autorizada concluída no S7/Android8, em microSD. 17 arquivos do manifesto conferidos por SHA-256. Backups de código e banco foram verificados; uma cópia do backup SQLite foi restaurada em outro arquivo no SD e passou quick_check. Migração preservou contagens exatas das quatro tabelas de observações/eventos e não criou preferências ou vínculos reais. Código de servidor privado, telemetria S7 e bundles privados do Vault permaneceram idênticos.
+
+- 99 testes Python locais e CI Checks run40249477353 aprovados; 27 testes específicos executados no próprio S7 em12,84s. Benchmark sintético no aparelho:1000 lookups MAC com três entradas OUI fictícias em140,37ms; isso não mede base IEEE completa.
+- Duas fixtures no navegador integrado aprovadas: home progressiva/500/retry/cancelamento e inventário1000/foco/paginação/320–1300px. CI executa os mesmos percursos.
+- Inventário real enriquecido:10 GETs, mediana150,5ms, faixa140,4–191,9ms;4 pedidos simultâneos114,4–613,6ms. Baseline imediatamente anterior:5 GETs, mediana124,5ms (116,8–189,1ms), sem enriquecimento; não alegar aceleração desta etapa. Crescimento do payload é esperado pelas evidências novas.
+- HTTP200 nos três projetos e APIs; fonte Router e snapshot do host quality=ok, historyError=null. Nenhuma mudança na cadência do Huawei.
+- Amostra de processo após atualização: RSS36212KiB; CPU acumulada34,5% durante inicialização/testes, não carga sustentada ou impacto isolado da classificação.
+- Interno disponível5260595200bytes (~4,90GiB), sem novo cache interno. SD disponível~62,8GB após backup consistente.
+
+Aceite funcional da publicação LAN concluído. Questões de medição no navegador cliente físico (INP/LCP/FPS/leitor de tela) continuam explicitamente na issue#13; não confundir fechamento das entregas de software com certificação universal desses alvos. Base oficial OUI não instalada porque download IEEE retornou418; desconhecido permanece null. Administração web permanece evolução futura; a alternativa CLI autenticada é a entrega segura atual de#11/#12.
