@@ -16,6 +16,22 @@ const refresh=node('button','Atualizar painel'),download=node('button','Exportar
 const notice=node('p','','observation-notice');notice.setAttribute('role','status');panel.append(notice);
 const summaryGrid=node('div',undefined,'observation-overview');panel.append(summaryGrid);
 const viewNote=node('p','Selecione uma fonte para inspecionar os dados. Os indicadores mostram valores reportados; não classificam automaticamente a segurança da rede.','observation-reading-note');panel.append(viewNote);
+const quickbar=node('div',undefined,'observation-quickfilters');
+quickbar.setAttribute('role','group');quickbar.setAttribute('aria-label','Filtrar por situação');
+const quickOptions=[['all','Todas'],['changed','Com alterações'],['missing','Sem leitura atual']];
+let quickMode='all';
+for(const [value,label] of quickOptions){
+ const b=node('button',label,'observation-filter-chip');
+ b.type='button';b.dataset.quick=value;b.setAttribute('aria-pressed',String(value==='all'));
+ b.addEventListener('click',()=>{
+   quickMode=value;
+   for(const el of quickbar.querySelectorAll('[data-quick]'))el.setAttribute('aria-pressed',String(el.dataset.quick===value));
+   applyFilters();
+ });
+ quickbar.append(b);
+}
+const matching=node('span','','observation-match-count');matching.setAttribute('role','status');
+quickbar.append(matching);panel.append(quickbar);
 const cards=node('div',undefined,'observation-cards');panel.append(cards);
 const timelineTitle=node('div',undefined,'observation-timeline-head');
 timelineTitle.append(node('h3','Histórico de alterações observadas'),node('p','Diferenças detetadas entre amostras sucessivas, não o instante exato da alteração.'));
@@ -29,8 +45,8 @@ Object.assign(labels,{pmf_policy_reported:'Política PMF reportada',wifi_mode_re
 const groups={wifi:['radio_settings','guest_limits','guest_network','wps','wifi_features','radios','wifi_backhaul','station_details'],clients:['dhcp','client_details','client_addresses','client_modes'],network:['ipv6','lan_settings','ipv6_lan','topology','wan_nat'],policies:['upnp','firewall_v4','firewall_v6','wan_acl','band_steering','wifi_schedule','mac_policy'],services:['usb_voice','file_services','dlna','voice_schedule']};
 let payload=null,busy=false;
 Object.assign(labels,{conflicting_fields:'Campos divergentes entre linhas reportadas',reported_rows:'Linhas reportadas para este MAC'});
-group.addEventListener('change',()=>{if(payload)render(payload);});
-search.addEventListener('input',()=>{if(payload)renderSources(payload);});
+group.addEventListener('change',applyFilters);
+search.addEventListener('input',applyFilters);
 document.querySelector('a[href="#routerObservability"]')?.addEventListener('click',()=>{document.getElementById('sidebar')?.classList.remove('open');});
 const time=v=>v?new Date(v).toLocaleString('pt-PT'):'Sem leitura';
 async function get(url){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000);try{const r=await fetch(url,{cache:'no-store',signal:controller.signal});if(!r.ok)throw Error();return await r.json();}finally{clearTimeout(timer);}}
@@ -40,7 +56,16 @@ async function historyPage(source,output,button,after=0){
   const a=await get(`/api/router/observability/archive?source=${encodeURIComponent(source.id)}&limit=100&after=${after}`);
   if(!after)output.replaceChildren(node('p',`Primeiras ${a.records.length} observações guardadas${a.has_more?' · carregue as páginas seguintes para continuar':''}.`));
   else button.remove();
-  for(const item of a.records){const d=node('details');d.append(node('summary',`${time(item.ts)} · ${item.status==='ok'?'Disponível':'Indisponível'}`));if(item.data?.length)d.append(table(item.data,source));else d.append(node('p',item.status==='ok'?'Nenhum registo.':'Leitura indisponível.'));output.append(d);}
+  for(const item of a.records){
+   const d=node('details',undefined,'observation-archive-entry');
+   d.append(node('summary',`${time(item.ts)} · ${item.status==='ok'?'Disponível':'Indisponível'}`));
+   d.addEventListener('toggle',()=>{
+     if(!d.open||d.childNodes.length>1)return;
+     if(item.data?.length)d.append(table(item.data,source));
+     else d.append(node('p',item.status==='ok'?'Nenhum registo.':'Leitura indisponível.'));
+   });
+   output.append(d);
+  }
   if(a.has_more){const more=node('button','Carregar mais observações');more.type='button';more.addEventListener('click',()=>historyPage(source,output,more,a.next_after));output.append(more);}
  }catch{output.append(node('p','Não foi possível consultar o arquivo. Pode tentar novamente.'));}
  finally{button.disabled=false;}
@@ -169,6 +194,96 @@ function sourceOverview(source){
  const preview=recordPreview(source);if(preview)result.append(preview);
  return result;
 }
+function svgNode(tag,attrs={},textValue){
+ const el=document.createElementNS('http://www.w3.org/2000/svg',tag);
+ for(const [key,value] of Object.entries(attrs))el.setAttribute(key,String(value));
+ if(textValue!==undefined)el.textContent=String(textValue);
+ return el;
+}
+function chartDate(ts){
+ return new Date(ts).toLocaleString('pt-PT',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+}
+function trendPanel(data){
+ const content=node('div',undefined,'observation-trend-inner');
+ const points=Array.isArray(data.points)?data.points:[];
+ const head=node('div',undefined,'observation-trend-header');
+ head.append(node('h4','Evolução no período'),badge(points.length+' leituras guardadas'));
+ content.append(head);
+ const message=node('p',undefined,'observation-trend-message');
+ message.textContent=data.truncated
+  ?'Prévia incompleta: apenas as '+points.length+' observações mais recentes do período. Leituras antigas continuam no arquivo.'
+  :'Leituras reais desta fonte no período. A ausência de pontos não é representada como zero.';
+ content.append(message);
+ if(!points.length){content.append(node('p','Não existem observações guardadas para esta fonte neste período.','observation-trend-empty'));return content;}
+ const status=points.filter(p=>p.status==='ok').length;
+ content.append(node('p',status+' leituras disponíveis · '+(points.length-status)+' indisponíveis · '+chartDate(points[0].ts)+' a '+chartDate(points[points.length-1].ts),'observation-trend-range'));
+ const options=Array.isArray(data.metrics)?data.metrics:[];
+ const select=node('select');select.setAttribute('aria-label','Métrica do histórico desta fonte');
+ for(const metric of options){
+   const option=node('option',metric.label);option.value=metric.key;select.append(option);
+ }
+ const lineLabel=node('label','Métrica histórica: ','observation-trend-select');
+ lineLabel.append(select);content.append(lineLabel);
+ const visual=node('div',undefined,'observation-trend-visual');content.append(visual);
+ function draw(){
+   visual.replaceChildren();
+   const metric=options.find(m=>m.key===select.value)||options[0];if(!metric)return;
+   const segments=VM.trendSegments(points,metric.key,data.cadence_seconds);
+   const domain=VM.trendDomain(segments,metric.unit);
+   if(!domain){
+     visual.append(node('p','Nenhuma medição numérica válida para esta métrica na janela. Estados indisponíveis e valores null não são zero.'));
+     return;
+   }
+   const caption=node('p',domain.total+' medições válidas · sem interpolação entre lacunas','observation-trend-caption');
+   const svg=svgNode('svg',{viewBox:'0 0 900 265',role:'img',
+      'aria-label':metric.label+' — '+domain.total+' medições válidas, de '+chartDate(points[0].ts)+' a '+chartDate(points[points.length-1].ts)});
+   svg.classList.add('observation-trend-svg');
+   const plot={left:56,right:872,top:22,bottom:220};
+   const first=Date.parse(points[0].ts),last=Date.parse(points[points.length-1].ts);
+   const extent=Math.max(1,last-first);
+   const x=t=>plot.left+(t-first)/extent*(plot.right-plot.left);
+   const y=v=>plot.bottom-(v-domain.min)/(domain.max-domain.min)*(plot.bottom-plot.top);
+   const format=n=>metric.unit==='registos'?String(Math.round(n)):String(Math.round(n*10)/10);
+   for(let i=0;i<=4;i++){
+     const value=domain.min+(domain.max-domain.min)*(1-i/4),yy=plot.top+(plot.bottom-plot.top)*i;
+     svg.append(svgNode('line',{x1:plot.left,x2:plot.right,y1:yy,y2:yy,class:'observation-trend-gridline'}));
+     svg.append(svgNode('text',{x:plot.left-9,y:yy+4,'text-anchor':'end',class:'observation-trend-axis'},format(value)));
+   }
+   const t1=svgNode('text',{x:plot.left,y:248,class:'observation-trend-axis'},chartDate(points[0].ts));
+   const t2=svgNode('text',{x:plot.right,y:248,'text-anchor':'end',class:'observation-trend-axis'},chartDate(points[points.length-1].ts));
+   svg.append(t1,t2);
+   const used=segments.flat();
+   for(const segment of segments){
+     const points2=segment.map(p=>[x(p.ts),y(p.value)]);
+     if(points2.length>1){
+       svg.append(svgNode('path',{d:points2.map((p,i)=>(i?'L':'M')+p[0].toFixed(2)+','+p[1].toFixed(2)).join(' '),
+         class:'observation-trend-line',fill:'none'}));
+     }
+     for(const [index,p] of segment.entries()){
+       if(segment.length>90&&index%Math.ceil(segment.length/90)!==0&&index!==segment.length-1)continue;
+       const dot=svgNode('circle',{cx:x(p.ts),cy:y(p.value),r:3.4,class:'observation-trend-dot'});
+       dot.append(svgNode('title',{},chartDate(p.ts)+' · '+p.value+' '+metric.unit));
+       svg.append(dot);
+     }
+   }
+   visual.append(svg,caption);
+   if(used.length===1)visual.append(node('p','Existe apenas uma medição válida; foi assinalada como ponto, sem desenhar uma tendência.'));
+ }
+ select.addEventListener('change',draw);
+ draw();
+ return content;
+}
+function sourceTrend(source,button,slot){
+ if(!slot.hidden&&slot.childNodes.length){slot.hidden=true;button.textContent='Ver gráfico histórico';return;}
+ if(slot.childNodes.length){slot.hidden=false;button.textContent='Ocultar gráfico histórico';return;}
+ button.disabled=true;button.textContent='A carregar histórico…';slot.hidden=false;
+ slot.replaceChildren(node('p','A consultar a fonte selecionada…'));
+ const hours=period.value;
+ get('/api/router/observability/trend?source='+encodeURIComponent(source.id)+'&hours='+encodeURIComponent(hours))
+  .then(result=>{slot.replaceChildren(trendPanel(result));button.textContent='Ocultar gráfico histórico';})
+  .catch(()=>{slot.replaceChildren(node('p','Não foi possível carregar o histórico desta fonte.'));button.textContent='Tentar novamente';})
+  .finally(()=>{button.disabled=false;});
+}
 function technical(source){
  const raw=node('details',undefined,'observation-raw'),head=node('summary','Inspecionar tabela técnica · '+(source.data?.length||0)+' linhas');
  const contents=node('div',undefined,'observation-raw-body');
@@ -190,12 +305,7 @@ function renderSources(data){
  const countsBySource=new Map();
  for(const c of data.changes)countsBySource.set(c.source,(countsBySource.get(c.source)||0)+1);
  const all=VM.sections(data.sources);
- const query=search.value.toLocaleLowerCase().trim();
- const allowed=(group.value==='all'?all:all.filter(section=>section.id===group.value)).map(section=>({
-   ...section,sources:section.sources.filter(src=>!query||[src.title,src.id,VM.header(src).description].join(' ').toLocaleLowerCase().includes(query))
- })).filter(section=>section.sources.length);
- if(!allowed.length)cards.append(node('p','Nenhuma fonte corresponde à pesquisa. Experimenta outro termo.','observation-search-empty'));
- for(const section of allowed){
+ for(const section of all){
    const sectionBox=node('section',undefined,'observation-section');
    sectionBox.id='diagnostic-'+section.id;
    const header=node('div',undefined,'observation-section-head');
@@ -206,7 +316,7 @@ function renderSources(data){
    const grid=node('div',undefined,'observation-section-grid');
    for(const source of section.sources){
      const h=VM.header(source);
-     const card=node('details',undefined,'observation-source');card.dataset.source=source.id;card.open=opened.has(source.id);
+     const card=node('details',undefined,'observation-source');card.dataset.source=source.id;card.dataset.section=section.id;card.open=opened.has(source.id);
      if(source.quality!=='ok')card.dataset.quality=source.quality;
      const summary=node('summary',undefined,'observation-source-summary');
      const lead=node('span',undefined,'observation-source-lead');
@@ -227,11 +337,38 @@ function renderSources(data){
      const history=node('button','Consultar observações guardadas');history.type='button';
      const output=node('div',undefined,'observation-archive');
      history.addEventListener('click',()=>historyPage(source,output,history));
-     actions.append(history);content.append(actions,output);
+     const trendButton=node('button','Ver gráfico histórico');trendButton.type='button';
+     const trendSlot=node('div',undefined,'observation-trend');trendSlot.hidden=true;
+     trendButton.addEventListener('click',()=>sourceTrend(source,trendButton,trendSlot));
+     actions.prepend(trendButton);content.append(actions,trendSlot,output);
      card.append(content);grid.append(card);
    }
    sectionBox.append(grid);cards.append(sectionBox);
  }
+ applyFilters();
+}
+function applyFilters(){
+ if(!payload)return;
+ const query=search.value.toLocaleLowerCase().trim(),changed=new Set(payload.changes.map(c=>c.source));
+ let visible=0;
+ for(const section of cards.querySelectorAll('.observation-section')){
+   let count=0;
+   for(const card of section.querySelectorAll('.observation-source')){
+     const source=payload.sources.find(s=>s.id===card.dataset.source);
+     const text=[source?.title,source?.id,VM.header(source||{}).description].join(' ').toLocaleLowerCase();
+     const match=(group.value==='all'||group.value===section.id)&&(!query||text.includes(query))&&
+       (quickMode==='all'||quickMode==='changed'&&changed.has(source?.id)||
+        quickMode==='missing'&&source?.quality!=='ok');
+     card.hidden=!match;if(match){visible++;count++;}
+   }
+   section.hidden=count===0;
+ }
+ matching.textContent=visible+' de '+payload.sources.length+' fontes visíveis';
+ let empty=cards.querySelector('.observation-search-empty');
+ if(!visible){
+   if(!empty){empty=node('p','Nenhuma fonte corresponde aos filtros. Podes mudar a pesquisa ou escolher “Todas”.','observation-search-empty');cards.append(empty);}
+   empty.hidden=false;
+ }else if(empty)empty.hidden=true;
 }
 function renderSummary(data){
  summaryGrid.replaceChildren();
