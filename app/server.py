@@ -186,6 +186,13 @@ class Handler(BaseHTTPRequestHandler):
                 with core.LOCK,core.connect() as db:
                     result=read(db,hours)
                 return self.respond(200,result)
+            if path.path == '/api/router/observability/trend':
+                from .router_observability import trend
+                query=parse_qs(path.query)
+                with core.LOCK,core.connect() as db:
+                    result=trend(db,query.get('source',[''])[0],query.get('hours',[24])[0],
+                                 query.get('limit',[400])[0])
+                return self.respond(200,result)
             if path.path == '/api/router/observability/archive':
                 from .router_observability import archive
                 query=parse_qs(path.query)
