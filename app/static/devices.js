@@ -15,12 +15,12 @@ function preserveFocus(root, update){
 function devices(){return Inventory.select(Array.isArray(app.clients)?app.clients:[],{sort:'status'});}
 function status(c){return {online:'Online reportado',offline:'Offline reportado',unknown:'Sem indicação',stale:'Sem leitura recente'}[c.presence||Inventory.presence(c)];}
 const DEVICE_CATEGORIES=new Set(['smartphone','tablet','laptop','desktop','game_console','smart_tv','streaming_box','printer','camera','robot_vacuum','network_device','iot','computer','android_device','unknown']);
-const CATEGORY_LABELS={smartphone:'Smartphone provável',tablet:'Tablet provável',laptop:'Notebook provável',desktop:'Computador provável',game_console:'Console provável',smart_tv:'Smart TV provável',streaming_box:'Multimédia provável',printer:'Impressora provável',camera:'Câmara provável',robot_vacuum:'Aspirador robô provável',network_device:'Equipamento de rede provável',iot:'IoT provável',computer:'Computador provável',android_device:'Equipamento Android provável',unknown:'Categoria desconhecida'};
+const CATEGORY_LABELS={smartphone:'Smartphone',tablet:'Tablet',laptop:'Notebook',desktop:'Computador',game_console:'Console',smart_tv:'Smart TV',streaming_box:'Multimédia',printer:'Impressora',camera:'Câmara',robot_vacuum:'Aspirador robô',network_device:'Equipamento de rede',iot:'IoT',computer:'Computador',android_device:'Equipamento Android',unknown:'Categoria desconhecida'};
 const PLATFORM_LABELS={android:'Android',ios:'iOS/iPadOS',windows:'Windows',linux:'Linux',macos:'macOS'};
 const CONFIDENCE_LABELS={high:'Alta',medium:'Média',low:'Baixa',unknown:'Desconhecida'};
 function categoryOf(c){const category=c?.presentation?.category||c?.classification?.category;return DEVICE_CATEGORIES.has(category)?category:'unknown';}
 function iconMarkup(c){const choice=c?.presentation?.icon;const category=DEVICE_CATEGORIES.has(choice)?choice:categoryOf(c);return '<svg class="device-category-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/device-icons.svg#'+category+'"></use></svg>';}
-function categoryLabel(c){return c?.presentation?.category?CATEGORY_LABELS[categoryOf(c)].replace(' provável','')+' · Personalizado':CATEGORY_LABELS[categoryOf(c)];}
+function categoryLabel(c){const label=CATEGORY_LABELS[categoryOf(c)];return c?.presentation?.category?label+' · Personalizado':label;}
 function identitySubtitle(c){
  const label=categoryLabel(c);
  const platform=PLATFORM_LABELS[c?.classification?.platform_family];
