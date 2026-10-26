@@ -190,7 +190,43 @@
    }
    return counts.map((count,i)=>({count,start:new Date(start+i*span).toISOString(),end:new Date(start+(i+1)*span).toISOString()}));
  }
- const api={SECTIONS,INFO,sections,summary,header,highlights,distribution,changeBins,shown,numericOverview};
+ function trendSegments(points,key,cadenceSeconds=300){
+   const segments=[];
+   const maxGap=Math.max(1,Number(cadenceSeconds)||300)*3*1000;
+   let current=[],lastTime=null;
+   for(const point of Array.isArray(points)?points:[]){
+     const ts=Date.parse(point?.ts),value=point?.[key];
+     const validPoint=point?.status==='ok'&&valid(value)&&Number.isFinite(ts);
+     if(!validPoint){
+       if(current.length)segments.push(current);
+       current=[];lastTime=null;continue;
+     }
+     if(lastTime!=null&&(ts<=lastTime||ts-lastTime>maxGap)){
+       if(current.length)segments.push(current);
+       current=[];
+     }
+     current.push({ts,value});
+     lastTime=ts;
+   }
+   if(current.length)segments.push(current);
+   return segments;
+ }
+ function trendDomain(segments,unit){
+   const values=(segments||[]).flatMap(segment=>segment.map(v=>v.value));
+   if(!values.length)return null;
+   let min=Math.min(...values),max=Math.max(...values);
+   if(unit==='registos'){
+     min=0;max=Math.max(1,max);
+   }else if(min===max){
+     const pad=unit==='dBm'||unit==='dB'?3:Math.max(1,Math.abs(min)*.08);
+     min-=pad;max+=pad;
+   }else{
+     const pad=Math.max(0.1,(max-min)*.08);
+     min-=pad;max+=pad;
+   }
+   return {min,max,total:values.length};
+ }
+ const api={SECTIONS,INFO,sections,summary,header,highlights,distribution,changeBins,shown,numericOverview,trendSegments,trendDomain};
  if(typeof module!=='undefined'&&module.exports)module.exports=api;
  else root.FNOObservabilityView=api;
 })(typeof window!=='undefined'?window:{});
