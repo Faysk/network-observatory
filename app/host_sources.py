@@ -17,6 +17,21 @@ def cpu_ids():
     except OSError:ids=[]
     return ids or list(range(min(os.cpu_count() or 0,64)))
 
+def positive(text):
+    value=int(text)
+    if value<=0:raise ValueError('unknown/nonpositive')
+    return value
+
+def boolean(text):
+    value=int(text)
+    if value not in (0,1):raise ValueError('invalid boolean')
+    return value
+
+def percentage(text):
+    value=int(text)
+    if not 0<=value<=100:raise ValueError('invalid percent')
+    return value
+
 def collect():
     metrics = {}
     def source(key, path, unit, parser=float, semantics=None):
@@ -49,7 +64,7 @@ def collect():
     source('cpu.present','/sys/devices/system/cpu/present','CPU list',str)
     for i in cpu_ids():
         base=f'/sys/devices/system/cpu/cpu{i}'
-        source(f'cpu.{i}.online',base+'/online','boolean',int)
+        source(f'cpu.{i}.online',base+'/online','boolean',boolean)
         for name in ('scaling_cur_freq','scaling_min_freq','scaling_max_freq','cpuinfo_min_freq','cpuinfo_max_freq'):
             source(f'cpu.{i}.{name}',base+'/cpufreq/'+name,'kHz',int)
         source(f'cpu.{i}.governor',base+'/cpufreq/scaling_governor','name',str)
@@ -70,12 +85,12 @@ def collect():
         for field in ('logical_block_size','physical_block_size'):
             source('disk.'+device+'.'+field,'/sys/block/'+device+'/queue/'+field,'bytes',int)
     for name,unit in [('capacity','%'),('temp','0.1 C'),('voltage_now','uV'),('current_now','driver raw'),('current_avg','driver raw'),('charge_counter','uAh'),('charge_full','uAh'),('charge_full_design','uAh'),('cycle_count','cycles'),('energy_now','uWh')]:
-        source('battery.'+name,'/sys/class/power_supply/battery/'+name,unit,int,
+        source('battery.'+name,'/sys/class/power_supply/battery/'+name,unit,percentage if name=='capacity' else int,
                'Samsung current units/sign not validated; retain raw value.' if name.startswith('current') else None)
     for name in ('status','health','technology','present'):
         source('battery.'+name,'/sys/class/power_supply/battery/'+name,'reported',str)
     for kind in ('usb','ac','wireless'):
-        source('power.'+kind,'/sys/class/power_supply/'+kind+'/online','boolean',int)
+        source('power.'+kind,'/sys/class/power_supply/'+kind+'/online','boolean',boolean)
     for i in range(8):
         source(f'thermal.zone{i}','/sys/class/thermal/thermal_zone'+str(i)+'/temp','driver raw',int,'Unidentified thermal zone; never labelled CPU temperature.')
     for name,unit in [('disksize','bytes'),('mm_stat','kernel positional counters'),('stat','block counters'),('orig_data_size','bytes'),('compr_data_size','bytes'),('mem_used_total','bytes')]:
@@ -92,7 +107,7 @@ def collect():
     if nets:
         for name in sorted(nets)[:16]:
             if not name.replace('_','').replace('-','').isalnum():continue
-            for field,parser in [('operstate',str),('mtu',int),('carrier',int),('speed',int)]:
+            for field,parser in [('operstate',str),('mtu',positive),('carrier',boolean),('speed',positive)]:
                 source(f'network.{name}.{field}',f'/sys/class/net/{name}/{field}','Mbps' if field=='speed' else 'reported',parser)
     # Explicit capability checks: retain absence/denial, never infer a zero reading.
     source('disk.counters','/proc/diskstats','sectors and counts',lambda t:{p[2]:[int(x) for x in p[3:]] for line in t.splitlines() if len(p:=line.split())>=14 and p[2] in ('mmcblk0','mmcblk1','sda')})

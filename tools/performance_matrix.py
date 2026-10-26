@@ -37,7 +37,7 @@ from app.query_cache import QueryCache
 from app.read_models import backfill_host, backfill_router
 from app.server import Handler
 
-SCHEMA = 1
+SCHEMA = 2
 MAC = '02:00:00:00:00:01'
 EXPECTED = {'cpu': 0, 'memory': 25, 'rx': 0, 'tx': 2, 'battery': 80,
             'temp': 30, 'latency': None, 'storage': 0}
@@ -208,7 +208,7 @@ def seed(directory, days, per_day, devices, padding):
     sample['memory'].update(usedMB=25, totalMB=100)
     sample['network'].update(rxMbps=0, txMbps=2)
     sample['battery'].update(levelPercent=80, temperatureC=30)
-    sample['storage'] = [{'usedGB': 0, 'totalGB': 64}]
+    sample['storage'] = [{'id':'internal','usedGB': 0, 'totalGB': 64}]
     sample['synthetic_padding'] = 'x'*padding
     sample['details']={'metrics':{'fixture.cpu':{'status':'ok','value':0,'source':'synthetic'}},'measuredAt':anchor.isoformat()}
     host.snapshot_data = sample

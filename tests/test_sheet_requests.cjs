@@ -45,3 +45,12 @@ assert(!draw([point(840,1),point(2640,2)]).includes('L'),'Missing summary bucket
 assert(!draw([point(840,1),point(1740,null),point(2640,2)]).includes('L'),'Unknown must break line');
 assert(!traceContext.trace([point(0,1),point(600,2)],'value',{...period,sampled_preview:false},t=>Date.parse(t),v=>v).includes('L'),'Real detailed gaps must remain gaps');
 console.log('Router lines: adjacent preview buckets connect; missing/null/detailed gaps remain interrupted.');
+
+for(const file of ['app/static/app.js','app/static/s7/js/app.js']){
+ const code=fs.readFileSync(file,'utf8'),start=code.indexOf('function parseTelemetryJson('),end=code.indexOf('async function ',start);
+ const c={JSON,Number};vm.createContext(c);vm.runInContext(code.slice(start,end)+';this.parse=parseTelemetryJson',c);
+ const value=c.parse('{"big":9007199254740993,"negative":-9007199254740993,"literal":"9007199254740993 \\"x\\"","fraction":0.12345678901234567,"exponent":1e3,"zero":0,"unknown":null}');
+ assert.equal(value.big,'9007199254740993');assert.equal(value.negative,'-9007199254740993');assert.equal(value.exponent,1000);assert.equal(value.zero,0);assert.equal(value.unknown,null);assert.equal(typeof value.fraction,'number');
+}
+assert(!traceContext.trace([{...point(840,3),wan_rx_bytes:3},{...point(1740,1),wan_rx_bytes:1}],'wan_rx_bytes',period,t=>Date.parse(t),v=>v).includes('L'),'Counter decrease must interrupt line, not look like negative traffic');
+console.log('Precision: unsafe JSON integers preserved; WAN counter decreases remain discontinuities.');

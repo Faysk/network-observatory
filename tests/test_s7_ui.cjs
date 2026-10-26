@@ -5,9 +5,9 @@ const context={window:{},document:doc,localStorage:{getItem(){return null},setIt
 context.window=context;vm.createContext(context);
 vm.runInContext(fs.readFileSync('app/static/s7/js/data.js','utf8'),context);
 let source=fs.readFileSync('app/static/s7/js/app.js','utf8').replace(/\r\n/g,'\n');
-source=source.replace('setTheme(state.theme);render();updateClock();','window.testS7={state,validSnapshot,checkAPI,num,render,emptySnapshot,pageFunctions,availableEntries,sourceDetail,explorerResults};setTheme(state.theme);render();updateClock();').replace('checkAPI(false);\n})();','})();');
+source=source.replace('setTheme(state.theme);render();updateClock();','window.testS7={state,validSnapshot,checkAPI,num,render,emptySnapshot,pageFunctions,availableEntries,sourceDetail,explorerResults,storageRow};setTheme(state.theme);render();updateClock();').replace('checkAPI(false);\n})();','})();');
 vm.runInContext(source,context);
-(async()=>{const t=context.testS7;assert.strictEqual(t.num(null),'Sem dados');assert.strictEqual(t.num(0),'0');let s=t.emptySnapshot();s.timestamp=new Date().toISOString();s.quality='ok';assert(t.validSnapshot(s));
+(async()=>{const t=context.testS7;assert.strictEqual(t.num(null),'Sem dados');assert.strictEqual(t.num(0),'0');assert.strictEqual(t.num('9007199254740993'),'9007199254740993');assert(t.storageRow({id:'internal',label:'Fixture',mount:'/fixture',usedGB:5,totalGB:10,availableBytes:4*2**30}).includes('40,0% disponível ao usuário'));let s=t.emptySnapshot();s.timestamp=new Date().toISOString();s.quality='ok';assert(t.validSnapshot(s));
 context.fetch=async url=>({ok:true,json:async()=>url.includes('history')?[]:s});await t.checkAPI();assert.strictEqual(t.state.mode,'real');s.timestamp=new Date(Date.now()-240000).toISOString();await t.checkAPI();assert.strictEqual(t.state.mode,'offline');s.timestamp=new Date().toISOString();await t.checkAPI();assert.strictEqual(t.state.mode,'real');assert.strictEqual(t.state.snapshot.battery.levelPercent,null);
 for(const key of Object.keys(t.pageFunctions)){t.state.page=key;t.render()}
 context.fetch=async()=>{throw Error('offline')};await t.checkAPI();assert.strictEqual(t.state.mode,'offline');assert.strictEqual(t.state.snapshot.timestamp,s.timestamp);assert.strictEqual(t.state.snapshot.cpu.usagePercent,null);

@@ -17,7 +17,7 @@ class HostProjectionTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.monitor = HostMonitor(Path(self.tmp.name)/'router.db')
-        self.now = (int(time.time())//3600)*3600+1800
+        self.now = (int(time.time())//3600)*3600-1800
         with closing(sqlite3.connect(self.monitor.path)) as db, db:
             db.execute('CREATE TABLE host_samples(ts REAL PRIMARY KEY,payload TEXT NOT NULL)')
             for i in range(5):
@@ -25,7 +25,7 @@ class HostProjectionTests(unittest.TestCase):
                 s['cpu']['usagePercent'] = [0, 25, None, 75, 100][i]
                 s['memory'].update(totalMB=100 if i != 2 else 0, usedMB=25)
                 s['network'].update(rxMbps=i, txMbps=None if i == 2 else 0)
-                s['storage'] = [{'usedGB': 0, 'totalGB': 64}]
+                s['storage'] = [{'id':'internal','usedGB': 0, 'totalGB': 64}]
                 db.execute('INSERT INTO host_samples VALUES(?,?)', (self.now-1000+i*60, json.dumps(s)))
 
     def tearDown(self):
@@ -46,6 +46,25 @@ class HostProjectionTests(unittest.TestCase):
         self.assertEqual(rebuild(self.monitor.path, 'host', 2), 3)
         self.assertEqual(self.query(), legacy)
         self.assertEqual(rebuild(self.monitor.path, 'host'), 0)
+
+    def test_storage_identifies_internal_and_legacy_projection_falls_back(self):
+        with closing(sqlite3.connect(self.monitor.path)) as db,db:
+            db.execute('DELETE FROM host_samples')
+            sample=empty_snapshot();sample['storage']=[{'id':'sd','usedGB':60,'totalGB':64},{'id':'internal','usedGB':10,'totalGB':20}]
+            db.execute('INSERT INTO host_samples VALUES(?,?)',(self.now,json.dumps(sample)))
+            columns=','.join('"'+k+'"' for k in read_models.HOST_EXPRESSIONS)
+            db.execute('CREATE TABLE host_chart_points(ts REAL PRIMARY KEY,'+columns+') WITHOUT ROWID')
+            db.execute('INSERT INTO host_chart_points(ts,storage) VALUES(?,99)',(self.now,))
+            before=db.execute('SELECT payload FROM host_samples').fetchone()[0]
+            self.assertEqual(read_models.query_host(db,self.now-1,60)[0][-1],50)
+            read_models.init_host(db)
+            self.assertEqual(read_models.query_host(db,self.now-1,60)[0][-1],50)
+            self.assertEqual(read_models.backfill_host(db),1)
+            self.assertEqual(read_models.query_host(db,self.now-1,60)[0][-1],50)
+            self.assertEqual(db.execute('SELECT payload FROM host_samples').fetchone()[0],before)
+            self.assertEqual(read_models.query_host(db,self.now-1,60,until=self.now-0.5),[])
+            db.execute('UPDATE host_samples SET payload=?',(json.dumps({'storage':[{'id':'sd','usedGB':60,'totalGB':64}]}),))
+            self.assertIsNone(read_models.query_host(db,self.now-1,60)[0][-1])
 
     def test_updates_deletes_and_backfill_are_not_hidden_by_projection(self):
         rebuild(self.monitor.path, 'host')
