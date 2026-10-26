@@ -166,6 +166,35 @@ class ClassifierRules(unittest.TestCase):
         self.assertEqual(classify(None,identity={'mac_type':'global','oui_vendor':'Nintendo Co.,Ltd'})['category'],'game_console')
         self.assertEqual(classify(None,identity={'mac_type':'locally_administered','oui_vendor':'Nintendo Co.,Ltd'})['category'],'unknown')
 
+    def test_tuya_assignment_suggests_only_generic_iot(self):
+        # These are synthetic client records; no private network MACs are used.
+        global_identity={
+            'mac_type':'global', 'oui_vendor':'Tuya Smart Inc.',
+            'oui_source':'wireshark_manuf',
+        }
+        result=classify(None, identity=global_identity)
+        self.assertEqual(result['category'],'iot')
+        self.assertEqual(result['confidence'],'low')
+        self.assertEqual(result['platform_family'],'unknown')
+        self.assertIn('tuya_iot_module_assignee_hint',
+                      [hint['rule'] for hint in result['evidence']])
+        self.assertNotIn('model',result)
+        # Honor case/punctuation variants without loose prefix matching.
+        self.assertEqual(classify(None,identity={**global_identity,
+                        'oui_vendor':'TUYA SMART INC'})['category'],'iot')
+        self.assertEqual(classify(None,identity={**global_identity,
+                        'oui_vendor':'Tuya Smart Inc. Unrelated'})['category'],'unknown')
+        self.assertEqual(classify(None,identity={**global_identity,
+                        'mac_type':'locally_administered'})['category'],'unknown')
+        self.assertEqual(classify(None,identity={**global_identity,
+                        'mac_type':'unknown'})['category'],'unknown')
+        # Do not override a more specific hostname-based type.
+        self.assertEqual(classify('IP-Camera-Test',identity=global_identity)['category'],'camera')
+        # Contradictory reported types must not be silently resolved.
+        conflict=classify('PS5',('Roomba',),identity=global_identity)
+        self.assertEqual(conflict['category'],'unknown')
+        self.assertIn('conflicting_device_category_hints',conflict['conflicts'])
+
     def test_input_order_and_invalid_types_are_safe(self):
         b={'names':['PS5','PS5'],'device_types':None,'ports':['Ethernet']}
         first=classify_client(b)
