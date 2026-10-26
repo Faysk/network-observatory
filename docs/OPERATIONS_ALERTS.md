@@ -112,6 +112,30 @@ acknowledgement, disparos e notificações. Se não estiver isolado em LAN/VPN,
 rever `SECURITY.md` antes de expor o painel: as **outras APIs existentes**
 ainda podem conter dados identificadores da LAN.
 
+### Tratamento conservador de lacunas e regras desligadas
+
+A configuração `"enabled": false` desativa **somente os alertas**, não a
+recolha passiva de métricas nem os cálculos de crescimento baseados no histórico.
+A taxa `growthMBPerDay` continua visível quando existirem pelo menos seis horas
+de amostras válidas, acompanhada por `growthSampleAgeMinutes` (idade da última
+medição arquivada). Um alerta **novo** de crescimento só é emitido se a leitura
+atual do host **e** a amostra mais recente do arquivo estiverem frescas.
+
+Se uma linha do arquivo histórico tiver JSON inválido, o ponto continua
+representado na linha temporal com `status: "unavailable"` e valores `null`.
+Isso impede tanto o desaparecimento completo do gráfico quanto uma linha
+enganadora atravessando a amostra corrompida. Não há reparação, eliminação nem
+reescrita automática do arquivo.
+
+A consulta de alterações aplica a seleção de fontes configuradas e o filtro
+de observações sem lacunas **antes** de limitar a janela a 40 alterações; eventos
+frequentes de fontes não monitorizadas (como UPnP) não ocultam uma alteração
+recente de uma fonte explicitamente monitorizada.
+
+No painel, regras desativadas ou telemetria incompleta recebem estado visual
+de atenção, nunca o indicador verde de saúde. Em falhas consecutivas da API,
+apenas um aviso de leitura desatualizada permanece visível.
+
 ## 4. QA, desempenho e publicação
 
 ```sh
