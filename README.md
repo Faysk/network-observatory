@@ -77,3 +77,5 @@ Licença MIT conforme `LICENSE`.
 Personalização e associações explícitas: [CLI administrativa local](docs/DEVICE_PREFERENCES.md).
 
 Consultas de gráficos compactas no microSD, reconstrução segura e espelho S7: [read models](docs/READ_MODELS.md).
+
+Matriz individual de contratos e desempenho, relatórios e comparação por versão: [guia de testes de performance](docs/PERFORMANCE_TESTS.md).
