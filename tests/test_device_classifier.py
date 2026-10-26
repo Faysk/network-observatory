@@ -70,7 +70,6 @@ class ClassifierRules(unittest.TestCase):
             ("00:11:22:33:44:55", (), "unknown", "unknown"),
             ("Ethernet", (), "unknown", "unknown"),
             ("Synthetic-Phone", ("MSFT 5.0",), "unknown", "unknown"),
-            (None, ("android-dhcp-8.0.0",), "unknown", "android"),
         ]
         for name, hints, cat, platform in cases:
             with self.subTest(name=name):
@@ -81,6 +80,34 @@ class ClassifierRules(unittest.TestCase):
         self.assertTrue(any(e['rule']=='dhcp_msft_signature'
             for e in classify('Synthetic-PC',('MSFT 5.0',))['evidence']))
         self.assertEqual(classify('Synthetic-PC',('MSFT 5.0',))['platform_family'],'unknown')
+
+    def test_contextual_computer_and_android_broad_category(self):
+        # Anonymous placeholders: these are NOT real inventory values.
+        computer=classify("Fixture-Predator", ("MSFT 5.0",))
+        self.assertEqual(computer["category"], "computer")
+        self.assertEqual(computer["confidence"], "medium")
+        self.assertEqual(computer["platform_family"], "unknown")
+        self.assertTrue(any(e["rule"]=="predator_computer_family_with_context"
+                            for e in computer["evidence"]))
+        acer=classify("Acer-Predator")
+        self.assertEqual(acer["category"], "computer")
+        # These names alone cannot distinguish a gaming PC from a nickname.
+        self.assertEqual(classify("Fixture-Predator")["category"], "unknown")
+        self.assertEqual(classify("Random-Predator", ("android-dhcp-12",))["category"], "android_device")
+        self.assertEqual(classify("Fixture-Host", ("MSFT 5.0",))["category"], "unknown")
+        # Android-DHCP identifies a platform hint, not phone/tablet model.
+        for name in ("Fixture-S7", "TARS-Fixture", None):
+            with self.subTest(name=name):
+                result=classify(name, ("android-dhcp-8.0.0",))
+                self.assertEqual(result["category"], "android_device")
+                self.assertEqual(result["platform_family"], "android")
+                self.assertEqual(result["confidence"], "low")
+        self.assertEqual(classify("Galaxy-Tab-Fixture", ("android-dhcp-14",))["category"], "tablet")
+        self.assertEqual(classify("Roomba-Fixture", ("android-dhcp-14",))["category"], "robot_vacuum")
+        self.assertEqual(classify("PS5", ("android-dhcp-14",))["category"], "game_console")
+        conflicting=classify("iPhone-16", ("android-dhcp-16",))
+        self.assertEqual(conflicting["platform_family"], "unknown")
+        self.assertEqual(conflicting["category"], "smartphone")
 
     def test_conflicting_categories_never_silently_pick_one(self):
         result=classify('PS5',('Roomba',))
