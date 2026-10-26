@@ -87,6 +87,12 @@ class ObservationTests(unittest.TestCase):
             oldest=o.archive_recent(db,'upnp',before=older['next_before'],limit=2)
             self.assertEqual([v['data'][0]['external_port'] for v in oldest['records']],[1000])
             self.assertFalse(oldest['has_more'])
+            # A historical backfill can have a larger ID than today's sample.
+            # Newest-first must sort by observed timestamp, never append order.
+            old_ts=(anchor-timedelta(hours=1)).isoformat()
+            db.execute("INSERT INTO router_observations(source,ts,status,reason,payload) VALUES(?,?,?,?,?)",
+                       ('upnp',old_ts,'ok',None,json.dumps([{'external_port':999}])))
+            self.assertEqual(o.archive_recent(db,'upnp',limit=2)['records'][0]['data'][0]['external_port'],1004)
             self.assertEqual(o.archive(db,'upnp',limit=2)['records'][0]['data'][0]['external_port'],1000)
             for kwargs in ({'source':'unknown'}, {'source':'upnp','limit':101},
                            {'source':'upnp','before':-1}):
