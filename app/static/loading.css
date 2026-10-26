@@ -28,3 +28,5 @@ body[data-initial-loading="true"] .metric-value strong{color:transparent;display
 @keyframes block-progress{0%,100%{opacity:.3;transform:scaleX(.3)}50%{opacity:1;transform:scaleX(1)}}
 @media(prefers-reduced-motion:reduce){.resource-block[data-load-phase="loading"]::after{animation:none}}
 body.motion-paused .resource-block::after{animation:none!important}
+
+.telemetry-mini>.block-load-status{bottom:2px;font-size:9px}.telemetry-mini{padding-bottom:22px}

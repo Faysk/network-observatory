@@ -87,8 +87,9 @@ function blockFeedback(node,name){
  badge.hidden=!text;
 }
 function updateResourceRegions(){
+ $$('.telemetry-mini').forEach(node=>blockFeedback(node,'status'));
  document.body.dataset.initialLoading=String(!state.status&&state.resources.status.phase==='loading');
- for(const [selector,name] of [['.metric-card[data-detail="traffic"]','status'],['.metric-card[data-detail="latency"]','status'],['.metric-card[data-detail="router"]','status'],['.metric-card[data-detail="devices"]','inventory'],['.hero-main','status'],['.hero-score','overview'],['.traffic-summary-values','status'],['.event-preview','overview'],['.signal-foot','status']])blockFeedback($(selector),name);
+ for(const [selector,name] of [['.metric-card[data-detail="traffic"]','status'],['.metric-card[data-detail="latency"]','status'],['.metric-card[data-detail="router"]','status'],['.metric-card[data-detail="devices"]','inventory'],['.hero-main','status'],['.hero-score','overview'],['.traffic-summary-values','status'],['.event-preview','overview'],['.signal-foot','status'],['.signal-main','overview'],['#deviceSection','inventory']])blockFeedback($(selector),name);
  for(const [name,id,label] of [['overview','#overviewState','histórico'],['inventory','#inventoryState','inventário']]){
    const el=$(id);if(!el)continue;
    const phase=state.resources[name].phase;
@@ -355,5 +356,5 @@ function init(){
  document.addEventListener('keydown',e=>{if(!$('#sheetLayer').hidden){if(e.key==='Escape')closeSheet();else trap(e,$('#detailSheet'));}});
  const tick=()=>$('#clock').textContent=new Date().toLocaleTimeString('pt-PT',{hour:'2-digit',minute:'2-digit'});tick();setInterval(tick,15000);refresh();setInterval(()=>{if(!document.hidden)refresh();},60000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh();});
 }
-window.FNO={state,$,$$,esc,fmt,time,duration,retention,api,toast,tile,keyvals,empty,chart,download,trap};
+window.FNO={state,$,$$,esc,fmt,time,duration,retention,api,toast,tile,keyvals,empty,chart,download,trap,blockFeedback};
 init();
