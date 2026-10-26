@@ -574,11 +574,17 @@ operationsTrend.addEventListener('toggle',renderOperationsHistory);
 function renderOperations(result){
  operationsLoaded=true;operationsMetrics.replaceChildren();operationsAlerts.replaceChildren();
  const h=result.health||{},active=Array.isArray(result.alerts)?result.alerts:[];
- operationsStatus.textContent=active.some(x=>x.severity==='critical')?'Estado crítico':
-   active.some(x=>x.severity==='warning')?'Requer atenção':
-   result.rules?.enabled===false?'Regras desativadas':
-   h.hostSampleAgeMinutes==null?'Telemetria incompleta':'Sem alertas ativos';
- operationsStatus.className='observation-badge '+(active.some(x=>x.severity==='critical')?'missing':active.some(x=>x.severity==='warning')?'aged':'present');
+ const hasCritical=active.some(x=>x.severity==='critical');
+ const hasWarning=active.some(x=>x.severity==='warning');
+ const rulesOff=result.rules?.enabled===false;
+ const incomplete=h.hostSampleAgeMinutes==null||h.collectorSuccessAgeMinutes==null||h.volumeAccessible===false;
+ operationsStatus.textContent=hasCritical?'Estado crítico':
+   hasWarning?'Requer atenção':
+   rulesOff?'Regras desativadas':
+   incomplete?'Telemetria incompleta':
+   active.length?'Observações registadas':'Sem alertas ativos';
+ // Disabled alerts and unknown health must never inherit the green "present" badge.
+ operationsStatus.className='observation-badge '+(hasCritical?'missing':hasWarning||rulesOff||incomplete?'aged':active.length?'':'present');
  function num(v,unit,digits=1){return typeof v==='number'&&Number.isFinite(v)?v.toFixed(digits)+(unit?' '+unit:''):'Sem medição';}
  const tiles=[
   ['RAM do processo',num(h.processRssMB,'MB'),'Da última leitura válida do S7'],
@@ -586,7 +592,9 @@ function renderOperations(result){
   ['SQLite + WAL',num(h.databaseMB,'MB')+' / '+num(h.walMB,'MB'),'Tamanho dos ficheiros, não espaço reservado'],
   ['API p95',num(h.apiP95Ms,'ms'),'Amostra das últimas 128 requisições'],
   ['Coletor Huawei',h.collectorState||'Desconhecido','Sucesso há '+num(h.collectorSuccessAgeMinutes,'min')],
-  ['Crescimento SQLite',num(h.growthMBPerDay,'MB/dia'),'Só calculado após ≥6 horas de leituras']
+  ['Crescimento SQLite',num(h.growthMBPerDay,'MB/dia'),
+   h.growthSampleAgeMinutes==null?'Só calculado após ≥6 horas de leituras':
+   'Taxa histórica · última amostra há '+num(h.growthSampleAgeMinutes,'min')]
  ];
  for(const [title,value,note] of tiles)operationsMetrics.append(metric(title,value,note));
  if(result.rulesSource==='invalid_file_disabled')
@@ -616,6 +624,9 @@ async function loadOperations(){
   operationsStatus.className='observation-badge aged';
   const warning=node('p','Não foi possível atualizar a saúde do Observatory. As métricas anteriores, se exibidas, podem estar desatualizadas.','observation-operations-warning');
   if(operationsLoaded){
+    // Repeated refresh failures should not pile up duplicate stale notices.
+    operationsAlerts.querySelectorAll('[data-stale-warning]').forEach(entry=>entry.remove());
+    warning.dataset.staleWarning='true';
     operationsAlerts.prepend(warning);
   }else{
     operationsAlerts.replaceChildren(warning);

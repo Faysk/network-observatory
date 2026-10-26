@@ -127,18 +127,34 @@ def history(host_db, now, limit=480):
         truncated = len(rows)>limit
         points = []
         for ts,raw in reversed(rows[:limit]):
-            sample = json.loads(raw)
-            diag = sample.get('diagnostics') or {}
-            storage = next((s for s in sample.get('storage',[]) if s.get('id')=='sd'),None)
-            points.append({
-                'ts': datetime.fromtimestamp(ts,timezone.utc).isoformat(),
-                'status': 'ok',
-                'rss_mb': diag.get('processRssMB') if finite(diag.get('processRssMB')) else None,
-                'database_mb': diag.get('databaseMB') if finite(diag.get('databaseMB')) else None,
-                'api_p95_ms': diag.get('apiP95Ms') if finite(diag.get('apiP95Ms')) else None,
-                'collector_ms': diag.get('routerCollectionMs') if finite(diag.get('routerCollectionMs')) else None,
-                'sd_free_gib': round(storage['availableBytes']/1073741824,2) if storage and finite(storage.get('availableBytes')) else None,
-            })
+            stamp = datetime.fromtimestamp(ts,timezone.utc).isoformat()
+            empty = {'ts':stamp,'status':'unavailable','rss_mb':None,
+                     'database_mb':None,'api_p95_ms':None,'collector_ms':None,
+                     'sd_free_gib':None}
+            try:
+                sample = json.loads(raw)
+                if not isinstance(sample,dict):
+                    raise ValueError('host sample is not an object')
+                diag = sample.get('diagnostics') or {}
+                if not isinstance(diag,dict):
+                    raise ValueError('invalid diagnostics object')
+                records = sample.get('storage') or []
+                storage = next((entry for entry in records
+                                if isinstance(entry,dict) and entry.get('id')=='sd'),None) if isinstance(records,list) else None
+            except (ValueError, TypeError, UnicodeError):
+                # Preserve the timestamp as an explicit gap; never bridge corrupt
+                # samples or lose the entire history due to one malformed record.
+                points.append(empty)
+                continue
+            empty.update(
+                status='ok',
+                rss_mb=diag.get('processRssMB') if finite(diag.get('processRssMB')) else None,
+                database_mb=diag.get('databaseMB') if finite(diag.get('databaseMB')) else None,
+                api_p95_ms=diag.get('apiP95Ms') if finite(diag.get('apiP95Ms')) else None,
+                collector_ms=diag.get('routerCollectionMs') if finite(diag.get('routerCollectionMs')) else None,
+                sd_free_gib=round(storage['availableBytes']/1073741824,2) if storage and finite(storage.get('availableBytes')) else None,
+            )
+            points.append(empty)
         return points,truncated
     except (OSError, sqlite3.Error, ValueError, TypeError, KeyError):
         return [],False
@@ -172,6 +188,17 @@ def read(now=None, host_snapshot=None, changes=None, rules=None):
     collector_age = age_minutes(collector.get('last_success'),now)
     rss = diag.get('processRssMB') if finite(diag.get('processRssMB')) else None
     api95 = diag.get('apiP95Ms') if finite(diag.get('apiP95Ms')) else None
+    # Health measurements must not disappear when the operator disables alerts.
+    db_points = [p for p in points if p.get('status') == 'ok' and finite(p.get('database_mb'))]
+    growth = None
+    growth_span_hours = None
+    growth_sample_age = age_minutes(db_points[-1]['ts'], now) if db_points else None
+    if len(db_points) >= 2:
+        growth_span_hours = (datetime.fromisoformat(db_points[-1]['ts']) -
+                             datetime.fromisoformat(db_points[0]['ts'])).total_seconds()/3600
+        if growth_span_hours >= 6 and db_points[-1]['database_mb'] >= db_points[0]['database_mb']:
+            growth = round((db_points[-1]['database_mb'] -
+                            db_points[0]['database_mb'])*24/growth_span_hours,2)
     out = []
     if rules['enabled']:
         if not store['volumeAccessible']:
@@ -200,27 +227,28 @@ def read(now=None, host_snapshot=None, changes=None, rules=None):
         if rss is not None and rss >= rules['process_rss_mb_warning'] and host_age is not None and host_age < rules['host_stale_minutes']:
             out.append(alert('rss_high','warning','RAM do processo elevada',
                              str(round(rss,1))+' MB de RSS reportados pelo S7.','host'))
-        # Use at least 6h of actual samples, not two very close points extrapolated to a day.
-        db_points = [p for p in points if finite(p.get('database_mb'))]
-        growth = None
-        if len(db_points)>=2:
-            span = (datetime.fromisoformat(db_points[-1]['ts'])-datetime.fromisoformat(db_points[0]['ts'])).total_seconds()/3600
-            if span>=6 and db_points[-1]['database_mb']>=db_points[0]['database_mb']:
-                growth=round((db_points[-1]['database_mb']-db_points[0]['database_mb'])*24/span,2)
-        if growth is not None and growth>=rules['sqlite_growth_mb_day_warning']:
+        # A historical slope is still available with alerts off, but a warning
+        # requires both recent host telemetry and a fresh archived endpoint.
+        growth_is_fresh = (host_age is not None and host_age < rules['host_stale_minutes']
+                           and growth_sample_age is not None and
+                           growth_sample_age < rules['host_stale_minutes'])
+        if growth is not None and growth_is_fresh and growth>=rules['sqlite_growth_mb_day_warning']:
             out.append(alert('db_growth','warning','Crescimento elevado do SQLite',
-                             str(growth)+' MB/dia estimados a partir de '+str(round(span,1))+' h observadas.','database'))
+                             str(growth)+' MB/dia estimados a partir de '+str(round(growth_span_hours,1))+' h observadas.','database'))
         if changes is None:
             changes=[]
-            if store['volumeAccessible'] and core.DB_PATH.is_file():
+            if rules['change_sources'] and store['volumeAccessible'] and core.DB_PATH.is_file():
                 try:
+                    selected = rules['change_sources']
+                    placeholders = ','.join('?' for _ in selected)
                     with sqlite3.connect(core.DB_PATH.resolve().as_uri()+'?mode=ro',uri=True,timeout=1) as db:
                         cutoff=(now-timedelta(minutes=rules['change_window_minutes'])).isoformat()
                         changes=[dict(zip(('id','source','previous_at','observed_at','crosses_gap'),row))
                             for row in db.execute(
                             'SELECT id,source,previous_at,observed_at,crosses_gap FROM router_changes '
-                            'WHERE observed_at>=? AND observed_at<=? ORDER BY observed_at DESC,id DESC LIMIT 40',
-                            (cutoff,now.isoformat()))]
+                            'WHERE observed_at>=? AND observed_at<=? AND source IN ('+placeholders+') '
+                            'AND crosses_gap=0 ORDER BY observed_at DESC,id DESC LIMIT 40',
+                            (cutoff,now.isoformat(),*selected))]
                 except (OSError, sqlite3.Error):
                     changes=[]
         for item in (changes or [])[:40]:
@@ -245,7 +273,8 @@ def read(now=None, host_snapshot=None, changes=None, rules=None):
         'walMB':store['wal'],
         'volumeFreeGiB':store['availableGiB'],
         'volumeAccessible':store['volumeAccessible'],
-        'growthMBPerDay':growth if 'growth' in locals() else None,
+        'growthMBPerDay':growth,
+        'growthSampleAgeMinutes':growth_sample_age,
     }
     return {
         'generatedAt':now.isoformat(),

@@ -90,7 +90,7 @@ class OperationsTests(unittest.TestCase):
     def test_existing_host_archive_supports_growth_calculation(self):
         with sqlite3.connect(Path(self.temp.name)/'host-telemetry.db') as db:
             db.execute('CREATE TABLE host_samples(ts REAL PRIMARY KEY,payload TEXT NOT NULL)')
-            for hours,size in [(7,10),(0.1,100)]:
+            for hours,size in [(7,10),(0.02,100)]:
                 when=self.now-timedelta(hours=hours)
                 db.execute('INSERT INTO host_samples VALUES(?,?)',
                     (when.timestamp(),json.dumps({'diagnostics':{'databaseMB':size,'processRssMB':48,'apiP95Ms':40},
@@ -110,6 +110,72 @@ class OperationsTests(unittest.TestCase):
         self.assertIn('storage_unavailable',[a['id'] for a in response['alerts']])
         self.assertIsNone(response['health']['processRssMB'])
         self.assertIsNone(response['health']['hostSampleAgeMinutes'])
+
+    def test_growth_remains_visible_when_local_alerts_are_disabled(self):
+        with sqlite3.connect(Path(self.temp.name)/'host-telemetry.db') as db:
+            db.execute('CREATE TABLE host_samples(ts REAL PRIMARY KEY,payload TEXT NOT NULL)')
+            for hours,size in [(8,20),(1/60,80)]:
+                when=self.now-timedelta(hours=hours)
+                db.execute('INSERT INTO host_samples VALUES(?,?)',
+                    (when.timestamp(),json.dumps({'diagnostics':{'databaseMB':size}})))
+        with patch('app.operations.sizes_and_storage',return_value=self.values()):
+            response=operations.read(now=self.now,host_snapshot=self.host(),
+                rules={'enabled':False,'sqlite_growth_mb_day_warning':10})
+        self.assertEqual(response['alerts'],[])
+        self.assertTrue(response['health']['growthMBPerDay']>100)
+        self.assertLess(response['health']['growthSampleAgeMinutes'],5)
+        self.assertEqual(len(response['history']['points']),2)
+
+    def test_malformed_history_is_an_explicit_gap_not_total_loss(self):
+        with sqlite3.connect(Path(self.temp.name)/'host-telemetry.db') as db:
+            db.execute('CREATE TABLE host_samples(ts REAL PRIMARY KEY,payload TEXT NOT NULL)')
+            data=[
+                (8,json.dumps({'diagnostics':{'databaseMB':20}})),
+                (4,'{ definitely not json'),
+                (1/60,json.dumps({'diagnostics':{'databaseMB':80},'storage':{'wrong':'shape'}})),
+            ]
+            for hours,raw in data:
+                db.execute('INSERT INTO host_samples VALUES(?,?)',
+                    ((self.now-timedelta(hours=hours)).timestamp(),raw))
+        with patch('app.operations.sizes_and_storage',return_value=self.values()):
+            response=operations.read(now=self.now,host_snapshot=self.host(),
+                rules={'sqlite_growth_mb_day_warning':10})
+        points=response['history']['points']
+        self.assertEqual(len(points),3)
+        self.assertEqual([p['status'] for p in points],['ok','unavailable','ok'])
+        self.assertTrue(all(points[1][key] is None for key in
+            ('rss_mb','database_mb','api_p95_ms','collector_ms','sd_free_gib')))
+        self.assertIsNone(points[2]['sd_free_gib'])
+        self.assertIsNotNone(response['health']['growthMBPerDay'])
+
+    def test_outdated_growth_does_not_trigger_a_new_warning(self):
+        with sqlite3.connect(Path(self.temp.name)/'host-telemetry.db') as db:
+            db.execute('CREATE TABLE host_samples(ts REAL PRIMARY KEY,payload TEXT NOT NULL)')
+            for hours,size in [(16,20),(8,500)]:
+                db.execute('INSERT INTO host_samples VALUES(?,?)',
+                    ((self.now-timedelta(hours=hours)).timestamp(),
+                     json.dumps({'diagnostics':{'databaseMB':size}})))
+        with patch('app.operations.sizes_and_storage',return_value=self.values()):
+            response=operations.read(now=self.now,host_snapshot=self.host(),
+                rules={'sqlite_growth_mb_day_warning':10})
+        self.assertGreater(response['health']['growthMBPerDay'],10)
+        self.assertGreater(response['health']['growthSampleAgeMinutes'],400)
+        self.assertNotIn('db_growth',[a['id'] for a in response['alerts']])
+
+    def test_irrelevant_recent_changes_cannot_hide_tracked_policy_change(self):
+        with sqlite3.connect(self.db) as db:
+            db.execute('CREATE TABLE router_changes(id INTEGER PRIMARY KEY,source TEXT,previous_at TEXT,observed_at TEXT,crosses_gap INTEGER)')
+            db.execute('INSERT INTO router_changes VALUES(1,?,?,?,?)',
+                ('wps',(self.now-timedelta(minutes=13)).isoformat(),
+                 (self.now-timedelta(minutes=12)).isoformat(),0))
+            for i in range(2,72):
+                db.execute('INSERT INTO router_changes VALUES(?,?,?,?,?)',
+                    (i,'upnp',(self.now-timedelta(minutes=4)).isoformat(),
+                     (self.now-timedelta(minutes=3)).isoformat(),0))
+        with patch('app.operations.sizes_and_storage',return_value=self.values()):
+            response=operations.read(now=self.now,host_snapshot=self.host())
+        self.assertIn('config_1',[a['id'] for a in response['alerts']])
+        self.assertEqual(len([a for a in response['alerts'] if a['id'].startswith('config_')]),1)
 
     def test_source_queries_are_read_only(self):
         with sqlite3.connect(self.db) as db:
