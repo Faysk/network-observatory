@@ -160,6 +160,9 @@ class HttpTests(unittest.TestCase):
 
     def test_observability_trend_endpoint_and_invalid_queries(self):
         result=json.loads(self.request('/api/router/observability/trend?source=station_details&hours=24')[1])
+        recent=json.loads(self.request('/api/router/observability/archive/recent?source=upnp&limit=10')[1])
+        self.assertEqual(recent['order'],'newest_first')
+        self.assertEqual(recent['records'],[])
         self.assertEqual(result['source'],'station_details')
         self.assertEqual(result['points'],[])
         self.assertEqual(result['metrics'][1]['key'],'rssi_mean_dbm')
@@ -171,6 +174,8 @@ class HttpTests(unittest.TestCase):
             '/api/router/observability/trend?source=dhcp&limit=401',
             '/api/router/observability/trend?source=dhcp&hours=8785',
             '/api/router/observability/trend?source=dhcp&limit=-1',
+            '/api/router/observability/archive/recent?source=upnp&limit=101',
+            '/api/router/observability/archive/recent?source=bad',
         ):
             with self.subTest(path=path),self.assertRaises(urllib.error.HTTPError) as error:
                 self.request(path)
