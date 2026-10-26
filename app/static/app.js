@@ -200,7 +200,7 @@ function chart(node,series,defs,period,selection){
  area.addEventListener('pointerleave',()=>{if(document.activeElement!==area)hide();});area.addEventListener('blur',hide);
  area.addEventListener('focus',()=>inspect(index));area.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','Home','End','Escape'].includes(e.key)){e.preventDefault();if(e.key==='Escape'){hide();return;}inspect(e.key==='Home'?0:e.key==='End'?valid.length-1:index+(e.key==='ArrowRight'?1:-1));}});
 }
-function appOnline(){const ready=['ready','empty'].includes(state.resources.inventory.phase);return state.api&&ready?state.clients.filter(c=>c.quality==='ok'&&c.reported_status==='Online').length:null;}
+function appOnline(){const meta=state.resources.inventory,ready=['ready','empty'].includes(meta.phase)||(meta.phase==='loading'&&meta.at!=null);return state.api&&ready?state.clients.filter(c=>c.quality==='ok'&&c.reported_status==='Online').length:null;}
 function renderHome(){
  const s=state.status,h=s?.huawei||{},current=state.api&&h.quality==='ok'&&fresh(h.collected_at),m=current?h.metrics||{}:{},o=state.overview;
  const probe=s?.probe,probeCurrent=state.api&&probe&&fresh(probe.ts);
