@@ -12,7 +12,7 @@ for(const [value,label] of [[24,'Últimas 24 horas'],[168,'Últimos 7 dias'],[72
 const group=node('select');group.setAttribute('aria-label','Grupo de fontes');
 for(const [value,label] of [['all','Todas as fontes'],['wifi','Wi-Fi'],['clients','Clientes e DHCP'],['network','LAN, WAN e IPv6'],['policies','Políticas e UPnP'],['services','Hardware e serviços']]){const option=node('option',label);option.value=value;group.append(option);}
 const search=node('input',undefined,'observation-source-search');search.type='search';search.placeholder='Pesquisar fonte ou diagnóstico…';search.setAttribute('aria-label','Pesquisar fontes de diagnóstico');
-const refresh=node('button','Atualizar painel'),download=node('button','Exportar resumo JSON');refresh.type=download.type='button';toolbar.append(group,period,search,refresh,download);panel.append(toolbar);
+const refresh=node('button','Atualizar painel'),download=node('button','Exportar JSON privado');refresh.type=download.type='button';toolbar.append(group,period,search,refresh,download);panel.append(toolbar);
 const notice=node('p','','observation-notice');notice.setAttribute('role','status');panel.append(notice);
 const summaryGrid=node('div',undefined,'observation-overview');panel.append(summaryGrid);
 const viewNote=node('p','Selecione uma fonte para inspecionar os dados. Os indicadores mostram valores reportados; não classificam automaticamente a segurança da rede.','observation-reading-note');panel.append(viewNote);
@@ -43,7 +43,7 @@ const unsupported=node('ul');limits.append(unsupported);panel.append(limits);pag
 const labels={interface:'Interface',slot:'Entrada',kind:'Tipo',enabled:'Ativo',hidden:'Rede oculta',auto_channel:'Canal automático',channel_reported:'Canal reportado',power_pct:'Potência configurada (%)',width_policy_code:'Política de largura',standard_reported:'Padrão configurado',work_mode_reported:'Modo configurado',auto_channel_scope_reported:'Âmbito do canal automático',mcs_setting:'MCS configurado',rssi_threshold_setting:'Limiar RSSI configurado',rssi_threshold_enabled:'Limiar RSSI ativo',channel_plus_setting:'Canal adicional configurado',wmm:'WMM',pmf:'Proteção de gestão (PMF)',beamforming:'Beamforming',ocac:'OCAC',scs:'SCS',periodic_auto_channel:'Canal automático periódico',qhop:'QHOP',service_enabled:'Serviço ativo',dtim_setting:'DTIM configurado',beacon_setting:'Beacon configurado',rts_threshold:'Limiar RTS',frag_threshold:'Limiar de fragmentação',airtime_fairness:'Airtime fairness',channel_scope:'Âmbito do canal',mu_mimo_enabled:'MU-MIMO configurado',preamble_setting:'Preâmbulo configurado',upload_limit_reported:'Limite de envio (reportado)',download_limit_reported:'Limite de receção (reportado)',lease_seconds_reported:'Duração UPnP (s, reportada)',remote_restricted:'Origem remota restrita',external_port:'Porta externa',internal_port:'Porta interna',protocol:'Protocolo',client_ip:'IP do cliente',description:'Descrição',mac:'MAC',ip:'IP local',name:'Nome reportado',alias:'Apelido reportado',lease_remaining_seconds:'Concessão restante (s)',lease_elapsed_reported_seconds:'Tempo DHCP reportado (s)',type_reported:'Tipo reportado',interface_reported:'Interface reportada',address_source_reported:'Origem do endereço',port_reported:'Porta reportada',ip_type_reported:'Tipo de IP',status_reported:'Estado reportado',port_type_reported:'Tipo de porta',time_reported:'Tempo reportado (escala por validar)',ipv4_enabled:'IPv4 ativo',ipv6_enabled:'IPv6 ativo',category_reported:'Categoria reportada',manual_type_reported:'Categoria definida no router',right_code:'Código de permissão',policy_code:'Código de política',level_code:'Código de nível',protocol_code:'Código de protocolo',wan_ref:'Referência WAN',source_restricted:'Origem restrita',connection_state:'Estado da ligação',encapsulation_reported:'Encapsulamento',dns_present:'DNS presente',aftr_present:'AFTR presente',gateway_present:'Gateway presente',uptime_seconds_reported:'Tempo IPv6 reportado (s)',origin_reported:'Origem reportada',present:'Presente',preferred_seconds_reported:'Validade preferida (s)',valid_seconds_reported:'Validade (s)',remaining_seconds_reported:'Tempo restante (s)',method_reported:'Método WPS',mlo_enabled:'MLO configurado',safe_remove_reported:'Remoção segura reportada',registration_state:'Estado do registo',call_state_reported:'Estado da chamada',registration_error:'Erro de registo',band:'Banda',component_reported:'Componente Wi-Fi reportado',lease_duration_seconds_reported:'Duração DHCP (s)',dns_override_present:'DNS personalizado presente',server_present:'Servidor presente',override_allowed:'Substituição permitida',managed:'Endereços geridos',other_config:'Outra configuração',l3_enabled:'Camada 3 ativa',mode_reported:'Modo reportado',vlan_reported:'VLAN',multicast_vlan_enabled:'VLAN multicast ativa',multicast_vlan_reported:'VLAN multicast',start_reported:'Início',end_reported:'Fim',repeat_days_code:'Código dos dias',ssid_mask_code:'Código da seleção de redes',filter_right:'Permissão MAC',filter_policy:'Política MAC',wlan_filter_right:'Permissão MAC Wi-Fi',wlan_filter_policy:'Política MAC Wi-Fi',port:'Porta',user_count:'Utilizadores configurados',share_all:'Partilha total configurada',wan_enabled:'Acesso WAN configurado',subnet_mask:'Máscara LAN',nat_enabled:'NAT configurado',services_reported:'Serviços WAN',connection_type_reported:'Tipo de ligação',backhaul_reported:'Backhaul reportado'};
 Object.assign(labels,{pmf_policy_reported:'Política PMF reportada',wifi_mode_reported:'Modo Wi-Fi reportado',beacon_type_reported:'Autenticação configurada',basic_encryption_reported:'Cifra básica configurada',wpa_encryption_reported:'Cifra WPA configurada',ieee_encryption_reported:'Cifra IEEE configurada',mixed_encryption_reported:'Cifra mista configurada',rekey_interval_reported:'Intervalo de renovação reportado',pool_start_ip:'Início do pool',pool_end_ip:'Fim do pool',source_interface_ref:'Referência da interface',lease_reported:'Concessão reportada',resource_unit_reported:'Unidade de recurso reportada',rx_link_mbps:'Taxa PHY RX (Mbps)',tx_link_mbps:'Taxa PHY TX (Mbps)',rssi_dbm:'RSSI (dBm)',noise_dbm_reported:'Ruído reportado (dBm)',snr_db_reported:'SNR reportado (dB)',signal_quality_reported:'Qualidade de sinal reportada',power_save:'Poupança de energia',high_band:'Banda alta',supports_11k:'802.11k reportado',supports_11v:'802.11v reportado',supports_11w:'802.11w reportado',supports_11r:'802.11r reportado',dual_band:'Duas bandas reportadas',twt_requester:'TWT requester',twt_responder:'TWT responder',bss_coloring:'BSS coloring',ofdma:'OFDMA',mu_mimo:'MU-MIMO reportado',mimo:'MIMO reportado'});
 const groups={wifi:['radio_settings','guest_limits','guest_network','wps','wifi_features','radios','wifi_backhaul','station_details'],clients:['dhcp','client_details','client_addresses','client_modes'],network:['ipv6','lan_settings','ipv6_lan','topology','wan_nat'],policies:['upnp','firewall_v4','firewall_v6','wan_acl','band_steering','wifi_schedule','mac_policy'],services:['usb_voice','file_services','dlna','voice_schedule']};
-let payload=null,busy=false;
+let payload=null,busy=false,pendingReload=false;
 Object.assign(labels,{conflicting_fields:'Campos divergentes entre linhas reportadas',reported_rows:'Linhas reportadas para este MAC'});
 group.addEventListener('change',applyFilters);
 search.addEventListener('input',applyFilters);
@@ -274,14 +274,15 @@ function trendPanel(data){
  return content;
 }
 function sourceTrend(source,button,slot){
+ if(button.dataset.trendState==='failed'){slot.replaceChildren();button.dataset.trendState='';}
  if(!slot.hidden&&slot.childNodes.length){slot.hidden=true;button.textContent='Ver gráfico histórico';return;}
  if(slot.childNodes.length){slot.hidden=false;button.textContent='Ocultar gráfico histórico';return;}
  button.disabled=true;button.textContent='A carregar histórico…';slot.hidden=false;
  slot.replaceChildren(node('p','A consultar a fonte selecionada…'));
  const hours=period.value;
  get('/api/router/observability/trend?source='+encodeURIComponent(source.id)+'&hours='+encodeURIComponent(hours))
-  .then(result=>{slot.replaceChildren(trendPanel(result));button.textContent='Ocultar gráfico histórico';})
-  .catch(()=>{slot.replaceChildren(node('p','Não foi possível carregar o histórico desta fonte.'));button.textContent='Tentar novamente';})
+  .then(result=>{slot.replaceChildren(trendPanel(result));button.dataset.trendState='loaded';button.textContent='Ocultar gráfico histórico';})
+  .catch(()=>{slot.replaceChildren(node('p','Não foi possível carregar o histórico desta fonte.'));button.dataset.trendState='failed';button.textContent='Tentar novamente';})
   .finally(()=>{button.disabled=false;});
 }
 function technical(source){
@@ -332,7 +333,13 @@ function renderSources(data){
      summary.append(lead,flags);card.append(summary);
      const content=node('div',undefined,'observation-source-content');
      content.append(node('p','Última leitura válida: '+time(source.collected_at)+(source.age_seconds==null?'':' · há '+source.age_seconds+' s')+'. Última tentativa: '+(source.attempt_status==='ok'?'disponível':source.attempt_status==='not_collected'?'não recolhida':'indisponível')+(source.reason?' · '+({schema:'formato não reconhecido',transport:'falha de comunicação',http:'falha HTTP',authentication:'autenticação',budget:'limite de tempo'}[source.reason]||'falha'):'')+'.','observation-provenance'));
-     content.append(sourceOverview(source),technical(source));
+     const overviewSlot=node('div',undefined,'observation-source-overview');
+     content.append(overviewSlot);
+     const populate=()=>{
+       if(!overviewSlot.childNodes.length)overviewSlot.append(sourceOverview(source),technical(source));
+     };
+     card.addEventListener('toggle',()=>{if(card.open)populate();});
+     if(card.open)populate();
      const actions=node('div',undefined,'observation-source-actions');
      const history=node('button','Consultar observações guardadas');history.type='button';
      const output=node('div',undefined,'observation-archive');
@@ -417,6 +424,6 @@ function render(data){
  unsupported.replaceChildren(...Object.values(data.unsupported||{}).map(v=>node('li',v)));
  notice.textContent=data.sources.filter(s=>s.quality==='ok').length+'/'+data.sources.length+' fontes atuais · consulta '+time(new Date().toISOString())+'.';
 }
-async function load(){if(busy)return;busy=true;refresh.disabled=true;notice.textContent='A consultar leituras guardadas…';try{payload=await get(`/api/router/observability?hours=${period.value}`);render(payload);}catch{notice.textContent='API indisponível. Os valores apresentados pertencem à última consulta bem-sucedida.';}finally{busy=false;refresh.disabled=false;}}
+async function load(){if(busy){pendingReload=true;return;}busy=true;refresh.disabled=true;notice.textContent='A consultar leituras guardadas…';try{payload=await get(`/api/router/observability?hours=${period.value}`);render(payload);}catch{notice.textContent='API indisponível. Os valores apresentados pertencem à última consulta bem-sucedida.';}finally{busy=false;refresh.disabled=false;if(pendingReload){pendingReload=false;load();}}}
 refresh.addEventListener('click',load);period.addEventListener('change',load);download.addEventListener('click',()=>{if(!payload)return;const url=URL.createObjectURL(new Blob([JSON.stringify(payload,null,2)],{type:'application/json'})),a=node('a');a.href=url;a.download='router-observations-private.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});load();setInterval(()=>{if(!document.hidden&&!panel.contains(document.activeElement))load();},60000);
 })();
