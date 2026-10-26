@@ -285,7 +285,6 @@ function updateSheetMeta(){
  $('#detailEyebrow').textContent='INVESTIGAÇÃO / LEITURAS REAIS';
  $$('[data-period]').forEach(el=>{const active=el.dataset.period===state.period;
    el.classList.toggle('active',active);el.setAttribute('aria-pressed',String(active))});
- if(observed)for(const d of defs){d.key=d.key.replace('_bytes','_observed_bytes');d.label=d.label.replace('Contador','Incrementos');}
  $('#legendBox').innerHTML=[
    ...(c.a?[['main',c.main,state.main]]:[]),
    ...(c.b?[['secondary',c.secondary,state.secondary]]:[])
