@@ -606,6 +606,7 @@ function renderOperations(result){
  operationsAlerts.append(footer);
  operationsHistoryData=result.history||{};
  if(operationsTrend.open)renderOperationsHistory();
+}
 async function loadOperations(){
  try{
   const result=await get('/api/router/operations');
