@@ -1,5 +1,6 @@
 """Read-only host telemetry. Cached sampling, separate lossless SQLite history."""
 from .host_sources import cpu_ids, kernel_release
+from . import request_timing
 import copy
 import secrets
 import json
@@ -308,7 +309,7 @@ class HostMonitor:
         except (TypeError,ValueError):raise ValueError('Cursor ou limite inválido')
         if not math.isfinite(after) or after<0 or not 1<=limit<=500:raise ValueError('Cursor ou limite inválido')
         if not self.path.is_file():return {'records':[],'nextAfter':None,'hasMore':False}
-        with closing(sqlite3.connect(self.path.resolve().as_uri()+'?mode=ro',uri=True,timeout=2)) as db:
+        with closing(sqlite3.connect(self.path.resolve().as_uri()+'?mode=ro',uri=True,timeout=2,factory=request_timing.Connection)) as db:
             rows=db.execute('SELECT ts,payload FROM host_samples WHERE ts>? ORDER BY ts LIMIT ?',(after,limit+1)).fetchall()
         page=rows[:limit]
         return {'records':[{'cursor':ts,'sample':json.loads(payload)} for ts,payload in page],
@@ -330,14 +331,14 @@ class HostMonitor:
                 return copy.deepcopy(cached[2])
             per_key=self.history_key_locks.setdefault(range_name,threading.Lock())
         # Identical requests share one calculation; unrelated metrics do not share the same lock.
-        with per_key:
+        with request_timing.acquire(per_key):
             with self.history_lock:
                 cached=self.history_cache.get(key)
                 if cached and cached[1]==self.history_generation and time.monotonic()-cached[0]<60:
                     return copy.deepcopy(cached[2])
                 generation=self.history_generation
             # Protect SD I/O with at most two distinct concurrent read queries.
-            with self.history_slots:
+            with request_timing.acquire(self.history_slots):
                 result=self.query_history(metric,range_name)
             with self.history_lock:
                 if generation==self.history_generation:
@@ -355,7 +356,7 @@ class HostMonitor:
         names=list(METRICS)
         from .read_models import query_host
         with self.history_lock:generation=self.history_generation
-        with closing(sqlite3.connect(self.path.resolve().as_uri()+'?mode=ro',uri=True,timeout=2)) as db:
+        with closing(sqlite3.connect(self.path.resolve().as_uri()+'?mode=ro',uri=True,timeout=2,factory=request_timing.Connection)) as db:
             rows=query_host(db,time.time()-seconds,bucket)
         result={name:[] for name in names}
         for row in rows:

@@ -1,0 +1,18 @@
+/* Honest loading feedback: no fabricated percentage or metric. */
+.load-placeholder{position:relative;overflow:hidden;border-radius:10px;background:var(--surface,#17222e);border:1px solid var(--border,#293844);min-height:180px;display:grid;align-content:center;gap:18px;padding:24px}
+.load-placeholder i{display:block;height:10px;border-radius:6px;background:currentColor;color:var(--muted,#8a9bad);opacity:.15;width:65%}
+.load-placeholder i:nth-child(2){width:90%}.load-placeholder i:nth-child(3){width:45%}
+.load-placeholder::after{content:"";position:absolute;inset:0;background:linear-gradient(100deg,transparent 25%,rgba(180,200,210,.08) 50%,transparent 75%);transform:translateX(-100%);animation:loading-sweep 1.7s ease-in-out 4}
+@keyframes loading-sweep{to{transform:translateX(100%)}}
+.resource-state[data-phase="loading"],.history-state.history-loading{min-height:32px}
+.resource-state[data-phase="loading"]::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:currentColor;margin-right:9px;animation:loading-breathe 1.2s ease-in-out 6}
+@keyframes loading-breathe{50%{opacity:.3}}
+.history-region{min-height:215px}.history-region[aria-busy="true"] .chart-holder{opacity:.72;transition:opacity .15s ease}
+.history-region[aria-busy="false"] .chart-holder{transition:opacity .15s ease}
+.freshness-bar[aria-busy="true"]{border-color:var(--accent,#b5ef78)}
+.btn:active,.range-button:active{transform:translateY(1px)}
+@media(prefers-reduced-motion:reduce){.load-placeholder::after,.resource-state::before{animation:none!important}.history-region .chart-holder{transition:none!important}}
+body[data-motion="off"] .load-placeholder::after{animation:none}
+
+.history-state.history-loading{height:auto;min-height:32px;flex-direction:row;justify-content:flex-start;gap:8px}
+body[data-initial-loading="true"] .metric-value strong{color:transparent;display:inline-block;min-width:70px;border-radius:6px;background:rgba(180,160,200,.12)}

@@ -116,10 +116,10 @@ function chart(metric,opts={}){
   const phase=phases.includes('error')?'error':phases.includes('stale')?'stale':phases.includes('loading')?'loading':phases[0];
   const old=phase==='stale',pending=phase==='loading',failed=phase==='error';
   const retry=`<button type="button" class="link-button history-retry" data-retry-history="${esc([metric,...(secondary?[secondary]:[])].join(','))}">Tentar novamente</button>`;
-  const message=failed?'Não foi possível carregar este histórico.':old?'Falha ao atualizar — exibindo apenas a última série válida deste período.':pending?'Carregando histórico deste período…':phase==='empty'?'Não há amostras registradas neste período.':'Ainda não há amostras suficientes neste período.';
+  const message=failed?'Não foi possível carregar este histórico.':old?'Falha ao atualizar — exibindo apenas a última série válida deste período.':pending?(vals?.length?'Atualizando · série anterior deste período visível…':'Carregando histórico deste período…'):phase==='empty'?'Não há amostras registradas neste período.':'Ainda não há amostras suficientes neste período.';
   const statusLabel=(pending||failed||old)?`<div class="history-state history-${phase}" role="status">${pending?'<span class="history-spinner" aria-hidden="true"></span>':''}<span>${message}</span>${failed||old?retry:''}</div>`:'';
   if(!vals||vals.length<2||!vals.some(p=>p.value!=null)){
-    return `<div class="history-region" data-history-region="${esc(metric)}" aria-busy="${pending}">${statusLabel||`<div class="empty history-empty" role="status">${message}</div>`}</div>`;
+    return `<div class="history-region" data-history-region="${esc(metric)}" aria-busy="${pending}">${statusLabel||`<div class="empty history-empty" role="status">${message}</div>`}${pending?'<div class="load-placeholder" aria-hidden="true"><i></i><i></i><i></i></div>':''}</div>`;
   }
   if(['rx','tx','temp'].includes(metric)){const all=[...vals,...(vals2||[])].map(p=>p.value).filter(v=>v!=null&&Number.isFinite(v));if(all.length){max=Math.max(metric==='temp'?1:.01,...all)*1.15;if(metric==='temp')min=Math.max(0,Math.min(...all)-3);}}
   chartRegistry.set(id,{values:vals,secondaryValues:vals2,secondaryName:secondary,min,max,unit:cfg.unit,metric,x0,y0,w,h,selectedIndex:previousChartSelection.get(state.page+':'+state.range+':'+metric+':'+(secondary||''))});
@@ -229,7 +229,7 @@ function updateMain(main,html,entering){
 }
 function updateChrome(){
  const connected=state.mode==='real',demo=state.mode==='demo';
- const label=demo?'DEMONSTRAÇÃO':connected?'API LOCAL':state.snapshot.timestamp?'LEITURA ANTIGA':'SEM CONEXÃO';
+ const label=demo?'DEMONSTRAÇÃO':connected?'API LOCAL':state.snapshot.timestamp?'LEITURA ANTIGA':state.fetching?'CONECTANDO':'SEM CONEXÃO';
  const note=demo?'Dados fictícios selecionados explicitamente.':connected?`Coleta no celular · ${dateTime(state.snapshot.timestamp)}`:state.snapshot.timestamp?`Última leitura: ${dateTime(state.snapshot.timestamp)}. Dados abaixo estão desatualizados.`:'Aguardando a primeira medição real. Sensores indisponíveis permanecem sem dados.';
  $('#mode-chip').className='mode-chip '+(connected?'real':'demo');
  $('#mode-chip').innerHTML=`<span></span> ${label}`;
@@ -237,6 +237,7 @@ function updateChrome(){
  $('#footer-update').textContent=state.snapshot.timestamp?`Amostra: ${dateTime(state.snapshot.timestamp)}`:'Sem amostra';
  $('#breadcrumb-current').textContent=nav.find(n=>n[0]===state.page)?.[1]||'Visão geral';
  const bar=$('#main-content').querySelector?.('.freshness-bar');
+ if(bar)bar.setAttribute('aria-busy',String(state.fetching));
  if(bar){
    bar.classList.toggle('is-stale',!connected);
    const strong=bar.querySelector('strong'),timestamp=bar.querySelector('span:nth-of-type(2)');
@@ -248,6 +249,7 @@ function updateChrome(){
    refresh.setAttribute('aria-busy',String(state.fetching));
  }
 }
+function initialShell(){return head('Conectando ao S7.','Buscando a primeira leitura do servidor.')+'<div class="cards-grid" aria-busy="true" aria-label="Carregando leituras">'+Array.from({length:4},()=>'<article class="card span-6"><div class="load-placeholder" aria-hidden="true"><i></i><i></i><i></i></div></article>').join('')+'</div>';}
 function render(){
  const main=$('#main-content'),entering=state.lastPage!==state.page;
  const oldSelections=new Map();
@@ -260,8 +262,8 @@ function render(){
  main.classList?.remove('page-enter');chartRegistry.clear();chartID=0;
  if(entering)setNav();
  const connected=state.mode==='real',demo=state.mode==='demo';
- const label=demo?'DEMONSTRAÇÃO':connected?'API LOCAL':state.snapshot.timestamp?'LEITURA ANTIGA':'SEM CONEXÃO';
- const html=`<div class="freshness-bar ${connected?'':'is-stale'}" role="status"><span class="freshness-dot"></span><strong>${connected?'Conectado ao S7':label}</strong><span>${state.snapshot.timestamp?'Amostra de '+esc(prettyTime(state.snapshot.timestamp)):'Conectando ao servidor…'}</span><button type="button" class="link-button" data-refresh ${state.fetching?'disabled aria-busy="true"':'aria-busy="false"'}>Atualizar ${ic('refresh')}</button></div>${detailedErrorBanner()}`+pageFunctions[state.page]();
+ const label=demo?'DEMONSTRAÇÃO':connected?'API LOCAL':state.snapshot.timestamp?'LEITURA ANTIGA':state.fetching?'CONECTANDO':'SEM CONEXÃO';
+ const html=`<div class="freshness-bar ${connected?'':'is-stale'}" role="status"><span class="freshness-dot"></span><strong>${connected?'Conectado ao S7':label}</strong><span>${state.snapshot.timestamp?'Amostra de '+esc(prettyTime(state.snapshot.timestamp)):'Conectando ao servidor…'}</span><button type="button" class="link-button" data-refresh ${state.fetching?'disabled aria-busy="true"':'aria-busy="false"'}>Atualizar ${ic('refresh')}</button></div>${detailedErrorBanner()}`+(!state.snapshot.timestamp&&state.fetching?initialShell():pageFunctions[state.page]());
  updateMain(main,html,entering);
  if(entering&&state.motion&&!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches)main.classList?.add('page-enter');
  if(entering)for(const el of Array.from(main.querySelectorAll?.('details[data-source],details.source-section')||[]))if(opened.includes(el.dataset.source||'section'))el.open=true;
@@ -308,7 +310,7 @@ async function checkAPI(showMessage=false){
    if(!Demo){if(showMessage)toast('Dados de demonstração indisponíveis.');return;}
    cancelAllHistory();state.mode='demo';state.snapshot=Demo.demoSnapshot(state.tick);state.history={};state.historyTimes={};state.historyStatus={};render();return;
  }
- state.fetching=true;updateChrome();
+ state.fetching=true;updateChrome();if(!state.snapshot.timestamp)render();
  try{
    const result=await fetchJson('/api/host/snapshot',8000);
    if(!validSnapshot(result))throw Error('Aguardando amostra');
@@ -324,7 +326,7 @@ async function checkAPI(showMessage=false){
    const changed=state.mode!=='offline';state.mode='offline';
    if(changed)render();else updateChrome();
    if(showMessage)toast('API indisponível; nenhuma simulação ativada.');
- }finally{state.fetching=false;updateChrome();}
+ }finally{state.fetching=false;if(!state.snapshot.timestamp)render();else updateChrome();}
 }
 function cancelAllHistory(){
  for(const [,flight] of historyFlights)flight.controller.abort();
@@ -340,6 +342,7 @@ function requestHistory(metric,range,{force=false}={}){
  if(!force&&time-(state.historyTimes[key]||0)<HISTORY_TTL_MS)return Promise.resolve(false);
  const controller=new AbortController();
  state.historyStatus[key]={phase:'loading',startedAt:time};
+ if(currentHistoryKeys().has(key))scheduleRender();
  const request=(async()=>{
    try{
      const result=await fetchJson('/api/host/history?metric='+encodeURIComponent(metric)+'&range='+encodeURIComponent(range),15000,controller.signal);

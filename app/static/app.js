@@ -72,17 +72,23 @@ async function sheetBundle(period,signal){
 function resourceMarkup(name,label){
  const meta=state.resources[name],phase=meta.phase,old=phase==='stale';
  const retry=phase==='error'||phase==='stale';
- const message=phase==='loading'?'A carregar '+label+'…':phase==='error'?'Falha ao carregar '+label+'.':old?'Última leitura preservada, mas a atualização falhou.':phase==='empty'?'Não foram encontrados dados de '+label+'.':'';
+ const message=phase==='loading'?(meta.at?'Atualizando '+label+' · leitura anterior visível…':'A carregar '+label+'…'):phase==='error'?'Falha ao carregar '+label+'.':old?'Última leitura preservada, mas a atualização falhou.':phase==='empty'?'Não foram encontrados dados de '+label+'.':'';
  return message?'<span>'+esc(message)+'</span>'+(retry?' <button type="button" data-retry-resource="'+name+'">Tentar novamente</button>':''):'';
 }
 function updateResourceRegions(){
+ document.body.dataset.initialLoading=String(!state.status&&state.resources.status.phase==='loading');
  for(const [name,id,label] of [['overview','#overviewState','histórico'],['inventory','#inventoryState','inventário']]){
    const el=$(id);if(!el)continue;
    const phase=state.resources[name].phase;
    el.dataset.phase=phase;el.setAttribute('aria-busy',String(phase==='loading'));
    el.innerHTML=resourceMarkup(name,label);
  }
- const chartNode=$('#overviewChart');if(chartNode)chartNode.setAttribute('aria-busy',String(state.resources.overview.phase==='loading'));
+ const chartNode=$('#overviewChart');if(chartNode){
+   const pending=state.resources.overview.phase==='loading';
+   chartNode.setAttribute('aria-busy',String(pending));
+   if(pending&&!state.overview)chartNode.innerHTML='<div class="load-placeholder" aria-hidden="true"><i></i><i></i><i></i></div>';
+   else if(!pending&&!state.overview)chartNode.replaceChildren();
+ }
 }
 function publishResource(name,data){
  if(name==='status'){state.status=data;state.api=true;}
@@ -93,7 +99,13 @@ function publishResource(name,data){
  state.resources[name]={phase:isEmpty?'empty':'ready',at:Date.now()};
  renderHome();updateResourceRegions();
 }
-async function fetchResource(name){
+const resourceFlights=new Map();
+function fetchResource(name){
+ if(resourceFlights.has(name))return resourceFlights.get(name);
+ const pending=loadResource(name).finally(()=>resourceFlights.delete(name));
+ resourceFlights.set(name,pending);return pending;
+}
+async function loadResource(name){
  state.resources[name]={...state.resources[name],phase:'loading'};
  updateResourceRegions();
  try{

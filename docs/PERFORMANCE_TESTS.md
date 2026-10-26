@@ -72,3 +72,15 @@ python tools/performance_matrix.py --transport http --allow-live --live-url http
 A origem deve ser a aplicação de observabilidade, **não o painel do Huawei**. São apenas GETs, sem autenticações/sondas adicionais, sem mudanças de configuração e sem aumentar polling do coletor. Dossiês/exports reais precisam de `--device-id` explícito (12 hex); não há seleção ou descoberta de dispositivos automática. O ID, a origem e os corpos não aparecem no relatório. Rotas/casos têm aliases estáveis; falhas guardam código/tipo sem mensagens do servidor. Respostas têm timeout e limite de bytes. Exports completos podem ser grandes e devem ser habilitados deliberadamente.
 
 Mesmo sanitizados, relatórios reais são privados: não enviar ao GitHub por padrão. Datas, tempos e volumes não demonstram igualdade de contexto entre rodadas. CI publica apenas relatórios sintéticos, com retenção de 14 dias e caminhos de artefatos explícitos, sem bancos/fixtures/payloads.
+
+## Diagnóstico de picos e fluxo misto
+
+`--transport http --include-flows --gzip` adiciona duas consultas compostas em 24h: abertura do Router (status, resumo, inventário) e rede do S7 (snapshot, RX, TX, latência). Cada membro valida seu contrato. O lote usa até quatro endpoints; o cenário concorrente simula quatro consumidores desses lotes (até 16 requisições). Use `--case '*/page/*'` para medir só os lotes e iniciar com `--concurrent 1` no aparelho real. Não representa renderização no navegador.
+
+O servidor inclui `Server-Timing` nas respostas API não transmitidas em streaming: `db` mede chamadas SQL execute/fetch (inclui espera SQLite), `wait` mede aquisição dos locks/semaforos instrumentados e espera por resultado compartilhado; `serialize` e `compress` medem essas operações. `app` é o restante do tempo, incluindo construção Python e trabalho não instrumentado, não CPU pura. `total` termina antes de enviar headers e corpo. Abertura de conexão SQLite não é separada: está em `app`. Não contém SQL, parâmetros, identificadores ou payloads; não cria logs em disco. Exportações em streaming não têm essas fases nos headers.
+
+A matriz guarda medianas `server_*_ms_median` quando disponíveis. Compare o mesmo teste com `--live-url http://127.0.0.1:8767` no S7 e pela LAN no PC. TTFB muito maior que `server_total` aponta para tempo fora da janela instrumentada, incluindo rede, conexão e despacho; não prova isoladamente qual deles é a causa. Medianas de fases independentes não devem ser subtraídas como se fossem uma mesma amostra.
+
+`--gzip` negocia compressão nível 1 para respostas >=16 KiB com ganho >=10%; bytes do relatório são transferidos comprimidos, parse inclui descompressão. Há limite tanto de bytes recebidos quanto descomprimidos. A compressão não armazena cache e mantém `no-store`. Comparar identity/gzip com perfis explicitamente separados; não usar baseline automático entre transportes diferentes.
+
+Para triagem sustentada, selecione os casos lentos com `--case`, use `--trials 20` e repita em momentos diferentes. O p95 passa a existir nas repetições, mas os quatro consumidores simultâneos continuam insuficientes para p95. Não chamar uma amostra inicial de cache frio.

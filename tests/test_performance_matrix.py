@@ -50,13 +50,16 @@ class MatrixTests(unittest.TestCase):
                 output=Path(folder)/(transport+'.json')
                 with contextlib.redirect_stdout(io.StringIO()):
                     args=['--transport',transport,'--days','1','--samples-per-day','2','--devices','2',
-                          '--payload-kib','0','--trials','1','--periods','1h','7d','--output',str(output)]
-                    code=matrix.main(args+(['--include-exports'] if transport=='http' else []))
+                          '--payload-kib','0','--trials','1','--periods','1h','24h','7d','--output',str(output)]
+                    code=matrix.main(args+(['--include-exports','--include-flows','--gzip'] if transport=='http' else []))
                 self.assertEqual(code,0)
                 data=json.loads(output.read_text(encoding='utf-8'))
                 self.assertTrue(all(row['functional'] for row in data['results']))
                 for metric in matrix.EXPECTED:
                     self.assertTrue(any(row['case']=='s7/history/'+metric+'/7d' for row in data['results']))
+                if transport=='http':
+                    self.assertTrue(any(row['case']=='router/page/24h' for row in data['results']))
+                    self.assertTrue(any('server_total_ms_median' in row for row in data['results']))
                 serialized=json.dumps(data)
                 self.assertNotIn(matrix.MAC,serialized)
                 self.assertNotIn('Fixture phone',serialized)
