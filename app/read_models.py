@@ -132,6 +132,7 @@ def router_revision(db):
 
 
 def overview_point(payload):
+    from .wifi_links import band_rssi
     point = dict(payload.get('metrics', {}))
     wan = next((k for k, v in payload.get('wan_states', {}).items() if 'Internet' in v.get('services', [])), None)
     counters = payload.get('interfaces', {}).get(wan, {})
@@ -141,15 +142,18 @@ def overview_point(payload):
     values = [s['rssi_dbm'] for s in payload.get('stations', []) if s.get('rssi_dbm') is not None]
     if values:
         point['rssi_dbm'] = sum(values)/len(values)
+    point.update(band_rssi(payload))
     return point
 
 
-def client_point(payload):
+def client_point(payload, wifi=None):
     point = {k: payload[k] for k in ('names', 'ips', 'ports', 'reported_status') if k in payload}
     stations = payload.get('stations', [])
     point['stations'] = [{k: stations[0][k] for k in
                           ('rssi_dbm', 'snr_db_reported', 'rx_link_mbps', 'tx_link_mbps', 'interface')
                           if k in stations[0]}] if stations else []
+    from .wifi_links import station_links
+    point['wifi_links'] = station_links(stations, wifi)
     return point
 
 
@@ -158,9 +162,9 @@ def project_overview(db, observation_id, stamp, payload):
                (stamp, observation_id, json.dumps(overview_point(payload), allow_nan=False, separators=(',', ':'))))
 
 
-def project_client(db, observation_id, stamp, mac, payload):
+def project_client(db, observation_id, stamp, mac, payload, wifi=None):
     db.execute('INSERT OR REPLACE INTO client_chart_points(mac,ts,id,payload) VALUES(?,?,?,?)',
-               (mac, stamp, observation_id, json.dumps(client_point(payload), allow_nan=False, separators=(',', ':'))))
+               (mac, stamp, observation_id, json.dumps(client_point(payload, wifi), allow_nan=False, separators=(',', ':'))))
 
 
 def device_rows(db, mac, start, end):
@@ -199,12 +203,16 @@ def backfill_router(db, batch=64, cursors=None):
     ):
         after = cursors.get(raw, 0) if cursors is not None else 0
         rows = db.execute(f'SELECT * FROM {raw} r WHERE id>? AND NOT EXISTS(SELECT 1 FROM {table} p WHERE p.id=r.id) ORDER BY id LIMIT ?', (after, batch)).fetchall()
+        parent_wifi = {}
         for row in rows:
             payload = json.loads(row['payload'])
             if raw == 'huawei_samples':
                 project(db, row['id'], row['ts'], payload)
             else:
-                project(db, row['id'], row['ts'], row['mac'], payload)
+                if row['sample_id'] not in parent_wifi:
+                    parent = db.execute('SELECT payload FROM huawei_samples WHERE id=?', (row['sample_id'],)).fetchone()
+                    parent_wifi[row['sample_id']] = json.loads(parent['payload']).get('wifi', {}) if parent else {}
+                project(db, row['id'], row['ts'], row['mac'], payload, parent_wifi[row['sample_id']])
         total += len(rows)
         if rows and cursors is not None:
             cursors[raw] = rows[-1]['id']
