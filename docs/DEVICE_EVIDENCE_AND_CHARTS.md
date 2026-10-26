@@ -29,3 +29,7 @@ O inspetor busca a leitura mais próxima em toda a área do gráfico e informa s
 ## Carregamento
 
 Detalhes de Router/dispositivo exibem estrutura de gráfico, métricas, leituras e eventos enquanto carregam. Cada região informa `aria-busy`, encerra seu estado em sucesso/erro e não mostra valores de outro período como atuais. Preferências de movimento reduzido/pausa são respeitadas.
+
+## Ethernet negotiated speed
+
+The inventory column joins an online device to exactly one explicit LAN port and displays its current negotiated speed from the existing status resource. Both readings must be fresh (180 seconds). Ambiguous, stale, offline, down or unreported links show unavailable. Duplicate representations of the same port are deduplicated. No new polling is added. The value describes the router port, including an upstream switch link; it does not certify the end-device cable or Internet throughput. 10/100 Mb/s can be a normal device limit or a cable/configuration limitation, not a diagnosis.
