@@ -27,11 +27,11 @@
     const stamp=Date.parse(huawei?.collected_at),seen=Date.parse(c?.last_seen);
     const matched=presence(c)==='online'&&huawei?.quality==='ok'&&Number.isFinite(stamp)&&Number.isFinite(seen)&&
       Math.abs(stamp-seen)<=1000&&now-stamp<=180000&&now-stamp>=-5000;
-    const list=names.map(interface=>{
-      const meta=matched?huawei.wifi?.[interface]:null;
+    const list=names.map(wlan=>{
+      const meta=matched?huawei.wifi?.[wlan]:null;
       const band=meta?.band==='2.4GHz'?'2,4 GHz':meta?.band==='5GHz'?'5 GHz':null;
       const channel=Number.isInteger(meta?.channel)&&meta.channel>=1?meta.channel:null;
-      return {interface,band,channel};
+      return {interface:wlan,band,channel};
     });
     const bands=[...new Set(list.map(x=>x.band).filter(Boolean))];
     const band=bands.length===1&&list.every(x=>x.band===bands[0])?bands[0]:null;
