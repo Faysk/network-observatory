@@ -13,8 +13,8 @@ const full=(period)=>({
  series:Array.from({length:3},(_,i)=>({timestamp:new Date(now-(3-i)*600000).toISOString(),timestamp_end:new Date(now-(3-i)*600000).toISOString(),sample_count:1,max_gap_seconds:0,cpu_pct:0,wan_rx_bytes:1000+i,wan_tx_bytes:0})),
  probes:[{timestamp:new Date(now-120000).toISOString(),timestamp_end:new Date(now-120000).toISOString(),sample_count:1,max_gap_seconds:0,router_ms:0,internet_ms:null}],
  stats:{cpu_pct:{min:0,max:0,avg:0,sample_count:1}},probe_stats:{router_ms:{min:0,max:0,avg:0,sample_count:1}},
- counter_series:[0,1,2].map(i=>({timestamp:new Date(now-(3-i)*60000).toISOString(),wan_rx_bytes:i===1?5:100+i,wan_tx_bytes:50+i,wan_rx_observed_bytes:i*10,wan_tx_observed_bytes:i,observed_epochs:{wan_rx_observed_bytes:0,wan_tx_observed_bytes:0}})),
- counter_period:{from:new Date(now-86400000).toISOString(),to:stamp,resolution_seconds:240,sampled_preview:true,observed_increments:{wan_rx_bytes:{bytes:20,valid_pairs:2,excluded_transitions:1},wan_tx_bytes:{bytes:2,valid_pairs:2,excluded_transitions:0}}},
+ counter_series:[0,1,2].map(i=>({timestamp:new Date(now-(3-i)*60000).toISOString(),wan_rx_bytes:i===1?5:100+i,wan_tx_bytes:50+i,wan_rx_observed_bytes:i*2**30,wan_tx_observed_bytes:i,observed_epochs:{wan_rx_observed_bytes:0,wan_tx_observed_bytes:0}})),
+ counter_period:{from:new Date(now-86400000).toISOString(),to:stamp,resolution_seconds:240,sampled_preview:true,observed_increments:{wan_rx_bytes:{bytes:2**31,valid_pairs:2,excluded_transitions:1},wan_tx_bytes:{bytes:2,valid_pairs:2,excluded_transitions:0}}},
  events:[],quality:{coverage_percent:1,sample_count:1,expected_count:1440}
 });
 const status={huawei:{quality:'ok',collected_at:stamp,source:'fixture',metrics:{cpu_pct:0},

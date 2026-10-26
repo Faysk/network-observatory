@@ -93,7 +93,7 @@ function blockFeedback(node,name){
 function updateResourceRegions(){
  $$('.telemetry-mini').forEach(node=>blockFeedback(node,'status'));
  document.body.dataset.initialLoading=String(!state.status&&state.resources.status.phase==='loading');
- for(const [selector,name] of [['.metric-card[data-detail="traffic"]','status'],['.metric-card[data-detail="latency"]','status'],['.metric-card[data-detail="router"]','status'],['.metric-card[data-detail="devices"]','inventory'],['.hero-main','status'],['.hero-score','overview'],['.traffic-summary-values','status'],['.event-preview','overview'],['.signal-foot','status'],['.signal-main','overview'],['#deviceSection','inventory']])blockFeedback($(selector),name);
+ for(const [selector,name] of [['.metric-card[data-detail="traffic"]','overview'],['.metric-card[data-detail="latency"]','status'],['.metric-card[data-detail="router"]','status'],['.metric-card[data-detail="devices"]','inventory'],['.hero-main','status'],['.hero-score','overview'],['.traffic-summary-values','status'],['.event-preview','overview'],['.signal-foot','status'],['.signal-main','overview'],['#deviceSection','inventory']])blockFeedback($(selector),name);
  for(const [name,id,label] of [['overview','#overviewState','histórico'],['inventory','#inventoryState','inventário']]){
    const el=$(id);if(!el)continue;
    const phase=state.resources[name].phase;
@@ -224,7 +224,9 @@ function renderHome(){
  $('.hero-score .score-ring').setAttribute('aria-label',`Cobertura temporal da recolha: ${fmt(coverage,2)} por cento`);
  let wan=current?Object.entries(h.wan_states||{}).find(([,v])=>v.services?.includes('Internet'))?.[0]:null;
  const counters=wan?h.interfaces?.[wan]:null;
- $('[data-metric="down"]').textContent=fmt(counters?.rx_bytes==null?null:counters.rx_bytes/2**30,2);
+ const observedRx=o?.counter_period?.observed_increments?.wan_rx_bytes?.bytes;
+ $('[data-metric="down"]').textContent=fmt(observedRx==null?null:observedRx/2**30,2);
+ $('[data-metric="down"]').closest('.metric-card').title='Última hora: soma dos incrementos RX válidos; quedas e lacunas excluídas. Pode estar incompleta. Até '+time(o?.counter_period?.to);
  $('[data-metric="latency"]').textContent=fmt(probeCurrent?probe.router_ms:null);
  $('[data-metric="cpu"]').textContent=fmt(m.cpu_pct);
  const online=appOnline();
@@ -236,10 +238,10 @@ function renderHome(){
  const events=o?.events||[];$('.nav-number').textContent=String(events.length);
  $('.event-preview').innerHTML=events.length?events.slice(0,3).map(e=>`<button class="event-line event-open" data-event="${e.id}"><span class="event-dot ${e.severity==='warning'||e.severity==='critical'?'amber-dot':'mint-dot'}"></span><span><strong>${esc(e.title)}</strong><small>${esc(time(e.ts))}</small></span><span class="event-pill neutral-pill">${esc(e.severity)}</span></button>`).join(''):empty('Sem eventos registados nesta janela.');
  ['traffic','latency','router','devices'].forEach(metric=>{
-   const c=config[metric],rows=c.probes?o?.probes:o?.series,node=$('#spark-'+metric);node.replaceChildren();
-   const vals=(rows||[]).map(r=>r[c.a]).filter(Number.isFinite);if(vals.length<2)return;
-   const min=Math.min(...vals),max=Math.max(...vals),period={...o.period,sampled_preview:!!o.summary?.sampled};
-   const points=seriesPath(rows,c.a,period,t=>(Date.parse(t)-Date.parse(period.from))/Math.max(1,Date.parse(period.to)-Date.parse(period.from))*108,v=>24-(v-min)/Math.max(1,max-min)*20);
+   const c=config[metric],key=metric==='traffic'?'wan_rx_observed_bytes':c.a,rows=metric==='traffic'?o?.counter_series:c.probes?o?.probes:o?.series,node=$('#spark-'+metric);node.replaceChildren();
+   const vals=(rows||[]).map(r=>r[key]).filter(Number.isFinite);if(vals.length<2)return;
+   const min=Math.min(...vals),max=Math.max(...vals),period=metric==='traffic'?o.counter_period:{...o.period,sampled_preview:!!o.summary?.sampled};
+   const points=seriesPath(rows,key,period,t=>(Date.parse(t)-Date.parse(period.from))/Math.max(1,Date.parse(period.to)-Date.parse(period.from))*108,v=>24-(v-min)/Math.max(1,max-min)*20);
    node.innerHTML=`<path d="${points}" fill="none" stroke="${metric==='latency'?'#d0a7ff':'#7de6c4'}" stroke-width="2"/>`;
  });
  updateResourceRegions();

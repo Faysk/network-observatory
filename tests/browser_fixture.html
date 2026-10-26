@@ -33,7 +33,10 @@
   hover.dispatchEvent(new w.PointerEvent('pointermove',{clientX:rect.left+rect.width*.4,clientY:rect.top+rect.height*.5,bubbles:true}));
   assert(!d.querySelector('#overviewChart .chart-inspector').hidden,'Nearest reading should be accessible between points');
   assert(d.querySelector('#overviewChart .chart-inspector').textContent.includes('leitura mais próxima'),'Nearest source must be explicit');
-  notes.push('summary retry and [] inventory');
+  assert(d.querySelector('[data-metric="down"]').textContent===w.FNO.fmt(2,2),'WAN card must use observed increments, not raw counter');
+  assert(d.querySelector('#spark-traffic path').getAttribute('d').includes('L'),'WAN card observed line missing');
+  assert(d.querySelector('[data-metric="down"]').closest('.metric-card').textContent.includes('Última hora · soma parcial'),'WAN card period/partial semantics missing');
+  notes.push('summary retry, WAN observed card and [] inventory');
   const trigger=d.querySelector('.nav-item[data-detail="latency"]');
   trigger.focus();trigger.click();
   await wait(()=>!d.getElementById('sheetLayer').hidden,'sheet opening');
