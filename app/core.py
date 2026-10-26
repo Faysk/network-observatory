@@ -16,6 +16,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from . import request_timing
 
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = Path(os.environ.get("FNO_DB", str(ROOT / "data" / "observatory.db")))
@@ -50,7 +51,7 @@ def valid_lan_ip(ip):
 @contextmanager
 def connect():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(DB_PATH, timeout=15)
+    db = sqlite3.connect(DB_PATH, timeout=15, factory=request_timing.Connection)
     try:
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA journal_mode=WAL")
@@ -62,7 +63,7 @@ def connect():
 
 
 def init_db():
-    with LOCK, connect() as db:
+    with request_timing.acquire(LOCK), connect() as db:
         db.executescript("""
         CREATE TABLE IF NOT EXISTS samples (
           id INTEGER PRIMARY KEY, ts TEXT NOT NULL,
@@ -149,7 +150,7 @@ def collect_once():
     # Remote TCP/443 measures a specific Internet path, NOT broadband speed.
     internet_up, internet_ms = tcp_probe("1.1.1.1", 443)
     ts = utcnow()
-    with LOCK, connect() as db:
+    with request_timing.acquire(LOCK), connect() as db:
         prev = db.execute("SELECT router_online,internet_online FROM samples ORDER BY id DESC LIMIT 1").fetchone()
         db.execute("INSERT INTO samples(ts,router_online,router_ms,internet_online,internet_ms) VALUES(?,?,?,?,?)",
                    (ts, int(router_up), router_ms, int(internet_up), internet_ms))
@@ -204,7 +205,7 @@ def put_router_metrics(data, source):
             raise ValueError(f"Bad text metric: {key}")
     if len(source) > 64:
         raise ValueError("Source too long")
-    with LOCK, connect() as db:
+    with request_timing.acquire(LOCK), connect() as db:
         db.execute("INSERT INTO router_metrics(ts,source,payload) VALUES(?,?,?)", (utcnow(), source, json.dumps(fields)))
         emit(db, "info", "integration", "Novas métricas Huawei recebidas", ", ".join(sorted(fields)), source)
     return fields
@@ -228,7 +229,7 @@ def list_devices(db):
 def put_huawei_sample(data, historical=False):
     from .adapters.huawei_b7 import validate_payload
     validate_payload(data,require_recent=not historical)
-    with LOCK, connect() as db:
+    with request_timing.acquire(LOCK), connect() as db:
         previous_sample=db.execute('SELECT payload FROM huawei_samples WHERE ts=? LIMIT 1',(data['collected_at'],)).fetchone()
         if previous_sample is not None:
             if json.loads(previous_sample['payload'])!=data:
@@ -270,7 +271,7 @@ def get_archive(kind='huawei',after=0,limit=1000):
     if kind not in ARCHIVE_TABLES:raise ValueError('Invalid archive kind')
     after=int(after);limit=int(limit)
     if after<0 or not 1<=limit<=2000:raise ValueError('Invalid archive page')
-    with LOCK,connect() as db:
+    with request_timing.acquire(LOCK),connect() as db:
         rows=db.execute(f'SELECT * FROM {ARCHIVE_TABLES[kind]} WHERE id>? ORDER BY id LIMIT ?',
                         (after,limit+1)).fetchall()
     more=len(rows)>limit
@@ -292,7 +293,7 @@ def get_router_clients(mac=None, limit=120):
     # One lazy, immutable registry per response; no lookup HTTP or database writes.
     # Configured main database is expected to live on microSD in S7 deployments.
     registry = get_registry(DB_PATH.parent) if mac is None else None
-    with LOCK,connect() as db:
+    with request_timing.acquire(LOCK),connect() as db:
         if mac is not None:
             if normalise_mac(mac)!=mac or mac is None:raise ValueError('Invalid MAC')
             rows=db.execute('SELECT ts,payload FROM router_client_samples WHERE mac=? ORDER BY ts DESC,id DESC LIMIT ?',
@@ -345,7 +346,7 @@ def latest_huawei(db):
 
 
 def get_status():
-    with LOCK, connect() as db:
+    with request_timing.acquire(LOCK), connect() as db:
         last = db.execute("SELECT * FROM samples ORDER BY id DESC LIMIT 1").fetchone()
         counts = db.execute("SELECT count(*) AS c FROM events").fetchone()["c"]
         return {"router": ROUTER, "probe": dict(last) if last else None,
@@ -359,7 +360,7 @@ def get_status():
 
 def get_history(hours=24, limit=450):
     cutoff = datetime.fromtimestamp(time.time() - hours*3600, tz=timezone.utc).isoformat(timespec="seconds")
-    with LOCK, connect() as db:
+    with request_timing.acquire(LOCK), connect() as db:
         rows = db.execute("SELECT * FROM samples WHERE ts>=? ORDER BY id DESC LIMIT 5000", (cutoff,)).fetchall()
         metrics = db.execute("SELECT * FROM router_metrics WHERE ts>=? ORDER BY id DESC LIMIT 5000", (cutoff,)).fetchall()
         huawei = db.execute('SELECT payload FROM huawei_samples WHERE ts>=? ORDER BY id DESC LIMIT 5000', (cutoff,)).fetchall()
@@ -374,7 +375,7 @@ def get_history(hours=24, limit=450):
 
 
 def get_events(limit=120):
-    with LOCK, connect() as db:
+    with request_timing.acquire(LOCK), connect() as db:
         return [dict(r) for r in db.execute("SELECT * FROM events ORDER BY id DESC LIMIT ?", (limit,))]
 
 
@@ -387,7 +388,7 @@ def add_device(data):
     if not valid_lan_ip(ip): raise ValueError("Usa um endereço IPv4 privado da tua rede")
     if not name or len(name) > 64: raise ValueError("Nome obrigatório (até 64 caracteres)")
     if not 0 <= port <= 65535: raise ValueError("Porta TCP inválida")
-    with LOCK, connect() as db:
+    with request_timing.acquire(LOCK), connect() as db:
         try:
             db.execute("INSERT INTO devices(name,ip,type,port,created_at) VALUES(?,?,?,?,?)", (name,ip,kind,port,utcnow()))
         except sqlite3.IntegrityError:
@@ -397,7 +398,7 @@ def add_device(data):
 
 
 def delete_device(device_id):
-    with LOCK, connect() as db:
+    with request_timing.acquire(LOCK), connect() as db:
         row = db.execute("SELECT name FROM devices WHERE id=?", (device_id,)).fetchone()
         if not row: raise ValueError("Dispositivo não encontrado")
         db.execute("DELETE FROM device_samples WHERE device_id=?", (device_id,))

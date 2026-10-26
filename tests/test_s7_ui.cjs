@@ -19,5 +19,6 @@ assert.strictEqual(t.availableEntries().length,2);const explorer=t.explorerResul
 const detail=t.sourceDetail('memory.meminfo');assert(detail.includes('&lt;script&gt;'));assert(!detail.includes('<img'));assert(detail.includes('MemFree'));
 t.state.search='missing-metric';assert(t.explorerResults().includes('Nenhuma leitura'));t.state.search='';
 for(const key of Object.keys(t.pageFunctions)){t.state.page=key;t.render();const html=nodes.get('#main-content').innerHTML;assert(!html.includes('30 dias'));assert(!html.includes('Temperatura de CPU'));assert(!html.includes('Sinal Wi-Fi'));}
+t.state.snapshot=t.emptySnapshot();t.state.fetching=true;t.render();assert(nodes.get('#main-content').innerHTML.includes('load-placeholder'));t.state.fetching=false;t.render();assert(!nodes.get('#main-content').innerHTML.includes('load-placeholder'));
 console.log('S7 UI: null/zero, partial data, all views, disconnected startup, stale preservation and explicit demo passed.');})().catch(e=>{console.error(e);process.exitCode=1});
 

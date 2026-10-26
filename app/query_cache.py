@@ -1,4 +1,5 @@
 """Bounded RAM cache and shared calculations; never persistent or authoritative."""
+from . import request_timing
 import copy
 import json
 import threading
@@ -35,7 +36,7 @@ class QueryCache:
             return copy.deepcopy(value)
         if leader:
             try:
-                with self.slots:
+                with request_timing.acquire(self.slots):
                     result = compute()
                 size = len(json.dumps(result, ensure_ascii=False, allow_nan=False).encode('utf-8'))
                 if size <= self.byte_limit and current_revision() == revision:
@@ -55,4 +56,6 @@ class QueryCache:
             finally:
                 with self.lock:
                     self.flights.pop(flight_key, None)
-        return copy.deepcopy(future.result())
+        with request_timing.phase('wait'):
+            result = future.result()
+        return copy.deepcopy(result)

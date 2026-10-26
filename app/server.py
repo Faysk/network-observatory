@@ -14,7 +14,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit, unquote
-from . import core
+from . import core, request_timing
 
 STATIC = Path(__file__).resolve().parent / "static"
 VALT = STATIC.parent.parent / "sites" / "valt"
@@ -45,9 +45,22 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "FayskNOC/0.1"
 
     def respond(self, code, data, mime="application/json; charset=utf-8"):
-        body = json.dumps(data, ensure_ascii=False).encode() if isinstance(data, (dict, list)) else data
-        if isinstance(body, str): body = body.encode()
+        with request_timing.phase('serialize'):
+            body = json.dumps(data, ensure_ascii=False).encode() if isinstance(data, (dict, list)) else data
+            if isinstance(body, str): body = body.encode()
+        is_api = urlsplit(self.path).path.startswith('/api/')
+        packed = None
+        if is_api and len(body) >= 16384 and _accepts_gzip(self.headers.get('Accept-Encoding')):
+            with request_timing.phase('compress'):
+                candidate = gzip.compress(body, compresslevel=1, mtime=0)
+                if len(candidate) < len(body)*0.9: packed = candidate
+        if packed is not None: body = packed
         self.send_response(code)
+        if is_api:
+            timing = request_timing.header()
+            if timing: self.send_header('Server-Timing', timing)
+            self.send_header('Vary', 'Accept-Encoding')
+            if packed is not None: self.send_header('Content-Encoding', 'gzip')
         self.send_header("Content-Type", mime)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
@@ -91,7 +104,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_HEAD(self):
         self._head_only=True
-        try:self.get_response()
+        try:
+            with request_timing.request_scope():self.get_response()
         finally:self._head_only=False
 
     def error_json(self, code, message):
@@ -122,7 +136,8 @@ class Handler(BaseHTTPRequestHandler):
         from . import host_telemetry
         began = time.perf_counter()
         try:
-            return self.get_response()
+            with request_timing.request_scope():
+                return self.get_response()
         finally:
             host_telemetry.record_api(urlsplit(self.path).path, (time.perf_counter()-began)*1000)
 

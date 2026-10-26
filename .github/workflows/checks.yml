@@ -18,7 +18,7 @@ jobs:
       - name: Individual backend performance and contracts (synthetic)
         run: python tools/performance_matrix.py --environment-label github-actions-synthetic --build-label "${{ github.sha }}" --output "${{ runner.temp }}/performance-backend.json"
       - name: HTTP performance, contracts and full exports (synthetic)
-        run: python tools/performance_matrix.py --transport http --include-exports --environment-label github-actions-synthetic --build-label "${{ github.sha }}" --output "${{ runner.temp }}/performance-http.json"
+        run: python tools/performance_matrix.py --transport http --include-exports --include-flows --gzip --environment-label github-actions-synthetic --build-label "${{ github.sha }}" --output "${{ runner.temp }}/performance-http.json"
       - name: Preserve sanitized performance reports
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

@@ -41,6 +41,24 @@ class HttpTests(unittest.TestCase):
         req=urllib.request.Request(self.url+path,data=encoded,headers=headers)
         with urllib.request.urlopen(req,timeout=HTTP_TIMEOUT) as res:return res.status,res.read(),dict(res.headers)
 
+    def test_api_timing_and_gzip_preserve_contract(self):
+        import gzip
+        fixture={'clients':[{'name':'synthetic repeated value','value':0} for _ in range(1500)]}
+        with patch('app.core.get_router_clients',return_value=fixture):
+            plain=self.request('/api/router/clients')
+            req=urllib.request.Request(self.url+'/api/router/clients',headers={'Accept-Encoding':'gzip'})
+            with urllib.request.urlopen(req,timeout=HTTP_TIMEOUT) as res:
+                packed=res.read();headers=dict(res.headers)
+            self.assertEqual(json.loads(gzip.decompress(packed)),fixture)
+            self.assertLess(len(packed),len(plain[1])//2)
+            self.assertEqual(headers['Content-Encoding'],'gzip')
+            self.assertEqual(headers['Cache-Control'],'no-store')
+            durations=dict(item.strip().split(';dur=') for item in headers['Server-Timing'].split(','))
+            self.assertEqual(set(durations),{'db','wait','app','serialize','compress','total'})
+            self.assertTrue(all(float(value)>=0 for value in durations.values()))
+            self.assertNotIn('synthetic',headers['Server-Timing'])
+        self.assertNotIn('Server-Timing',self.request('/router/')[2])
+
     def test_host_namespace_partial_and_static_isolation(self):
         from app.host_telemetry import HostMonitor, empty_snapshot
         m=HostMonitor(Path(self.temp.name)/'observatory.db')

@@ -3,6 +3,7 @@
 Reports contain metrics only. Live mode requires explicit operator opt-in and
 never starts a source, changes configuration or records response bodies.
 """
+import gzip
 import argparse
 import concurrent.futures
 import csv
@@ -146,7 +147,8 @@ def measured(case):
 def summarize(case, mode, samples, errors):
     row = {'id': case.id+'/'+mode, 'case': case.id, 'transport': case.transport, 'mode': mode,
            'functional': not errors, 'errors': errors, **stats([x['total_ms'] for x in samples])}
-    for field in ('query_or_http_ms', 'serialize_ms', 'validate_ms', 'thread_cpu_ms', 'ttfb_ms', 'body_ms', 'parse_ms'):
+    for field in ('query_or_http_ms', 'serialize_ms', 'validate_ms', 'thread_cpu_ms', 'ttfb_ms', 'body_ms', 'parse_ms',
+                  'server_db_ms','server_wait_ms','server_app_ms','server_serialize_ms','server_compress_ms','server_total_ms'):
         values = [x[field] for x in samples if field in x]
         if values:
             row[field+'_median'] = round(statistics.median(values), 3)
@@ -262,20 +264,34 @@ def backend_cases(monitor, periods, devices=None):
     return cases
 
 
-def http_cases(url, device, periods, exports, max_bytes, timeout, synthetic=False, devices=None):
+def http_cases(url, device, periods, exports, max_bytes, timeout, synthetic=False, devices=None, compressed=False, flows=False):
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     def request(path, kind='json'):
         def call():
             started = time.perf_counter()
-            with opener.open(url.rstrip('/')+path, timeout=timeout) as response:
+            req=urllib.request.Request(url.rstrip('/')+path,headers={'Accept-Encoding':'gzip' if compressed else 'identity'})
+            with opener.open(req, timeout=timeout) as response:
                 headers_at = time.perf_counter()
                 require(response.status == 200, 'HTTP status failure')
                 body = response.read(max_bytes+1)
                 require(len(body) <= max_bytes, 'Response size cap exceeded')
+                wire_bytes=len(body)
+                server={}
+                for item in response.headers.get('Server-Timing','').split(','):
+                    name,_,parameter=item.strip().partition(';dur=')
+                    if name in ('db','wait','app','serialize','compress','total'):
+                        try:
+                            duration=float(parameter)
+                            if math.isfinite(duration) and duration>=0:server['server_'+name+'_ms']=duration
+                        except ValueError:pass
+                encoding=response.headers.get('Content-Encoding')
             body_at = time.perf_counter()
+            if encoding=='gzip':
+                with gzip.GzipFile(fileobj=io.BytesIO(body)) as stream:body=stream.read(max_bytes+1)
+                require(len(body)<=max_bytes,'Decoded response size cap exceeded')
             value = json.loads(body) if kind == 'json' else list(csv.DictReader(io.StringIO(body.decode('utf-8-sig'))))
             parsed = time.perf_counter()
-            return value, len(body), {'ttfb_ms': (headers_at-started)*1000, 'body_ms': (body_at-headers_at)*1000,
+            return value, wire_bytes, {**server, 'ttfb_ms': (headers_at-started)*1000, 'body_ms': (body_at-headers_at)*1000,
                                       'parse_ms': (parsed-body_at)*1000}
         return call
     cases = [Case('router/status', 'http', request('/api/status'), lambda v: require('huawei' in v, 'Missing source')),
@@ -308,6 +324,20 @@ def http_cases(url, device, periods, exports, max_bytes, timeout, synthetic=Fals
         for metric in host_telemetry.METRICS:
             cases.append(Case(f's7/history/{metric}/{host_range}', 'http', request('/api/host/history?metric='+metric+'&range='+host_range),
                               lambda v, m=metric: series(v, EXPECTED[m] if synthetic else 'contract')))
+    if flows:
+        # Representative mixed endpoint batches; not a browser rendering benchmark.
+        groups={'router/page/24h':['router/status','router/inventory','router/overview/summary/24h'],
+                's7/page/network/24h':['s7/snapshot','s7/history/rx/24h','s7/history/tx/24h','s7/history/latency/24h']}
+        lookup={case.id:case for case in cases}
+        for name,ids in groups.items():
+            if not all(key in lookup for key in ids):continue
+            members=[lookup[key] for key in ids]
+            def batch(selected=members):
+                with concurrent.futures.ThreadPoolExecutor(max_workers=len(selected)) as pool:
+                    rows=list(pool.map(lambda case:case.invoke(),selected))
+                for case,row in zip(selected,rows):case.validate(row[0])
+                return None,sum(row[1] for row in rows),{}
+            cases.append(Case(name,'http',batch,lambda v:None))
     return cases
 
 
@@ -372,6 +402,8 @@ def main(argv=None):
     p.add_argument('--periods', nargs='+', choices=list(historian.PERIODS), default=list(historian.PERIODS))
     p.add_argument('--trials', type=int, default=5)
     p.add_argument('--concurrent', type=int, default=4)
+    p.add_argument('--include-flows',action='store_true',help='Mixed endpoint page batches (HTTP only)')
+    p.add_argument('--gzip',action='store_true',help='Negotiate compressed API responses (HTTP only)')
     p.add_argument('--include-exports', action='store_true', help='Opt-in potentially large read-only exports')
     p.add_argument('--timeout', type=float, default=30)
     p.add_argument('--max-response-mib', type=int, default=32)
@@ -389,7 +421,7 @@ def main(argv=None):
         p.error('--fail-regressions requires --baseline; no silent disabled gate')
     if args.fail_budgets and not args.budgets:
         p.error('--fail-budgets requires --budgets; no silent disabled gate')
-    if args.include_exports and args.transport!='http':
+    if (args.include_exports or args.include_flows or args.gzip) and args.transport!='http':
         p.error('Full exports are HTTP cases; select --transport http explicitly')
     if not (1 <= args.days <= 366 and 1 <= args.samples_per_day <= 1440 and 1 <= args.devices <= 100 and 0 <= args.payload_kib <= 128):
         p.error('Invalid bounded fixture dimensions')
@@ -433,7 +465,7 @@ def main(argv=None):
     profile = {'kind': 'live' if args.live_url else 'synthetic', 'transport': args.transport,
                'days': args.days, 'samples_per_day': args.samples_per_day, 'devices': args.devices,
                'payload_kib': args.payload_kib, 'trials': args.trials, 'concurrent': args.concurrent,
-               'include_exports': args.include_exports, 'periods': args.periods, 'fixture_schema': SCHEMA,
+               'include_exports': args.include_exports, 'include_flows':args.include_flows, 'gzip':args.gzip, 'periods': args.periods, 'fixture_schema': SCHEMA,
                'live_device_selected': bool(args.device_id)}
     profile['case_patterns']=args.case_patterns
     if args.live_url:
@@ -448,7 +480,7 @@ def main(argv=None):
     with ExitStack() as stack:
         reset = None
         if args.live_url:
-            cases = http_cases(args.live_url, args.device_id, args.periods, args.include_exports, args.max_response_mib*1024**2, args.timeout)
+            cases = http_cases(args.live_url, args.device_id, args.periods, args.include_exports, args.max_response_mib*1024**2, args.timeout, compressed=args.gzip, flows=args.include_flows)
         else:
             folder = stack.enter_context(tempfile.TemporaryDirectory(prefix='synthetic-perf-matrix-', dir=args.work_dir))
             stack.enter_context(patch.object(core, 'DB_PATH', Path(folder)/'observatory.db'))
@@ -469,7 +501,7 @@ def main(argv=None):
                 stack.callback(server.server_close)
                 stack.callback(server.shutdown)
                 cases = http_cases(f'http://127.0.0.1:{server.server_address[1]}', MAC.replace(':', ''), args.periods,
-                                   args.include_exports, args.max_response_mib*1024**2, args.timeout, synthetic=True, devices=args.devices)
+                                   args.include_exports, args.max_response_mib*1024**2, args.timeout, synthetic=True, devices=args.devices, compressed=args.gzip, flows=args.include_flows)
         if args.case_patterns:
             cases=[case for case in cases if any(fnmatch.fnmatchcase(case.id,pattern) for pattern in args.case_patterns)]
             if not cases:

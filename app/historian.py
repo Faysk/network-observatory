@@ -7,6 +7,7 @@ import time
 from collections import OrderedDict
 from collections import deque
 from datetime import datetime, timezone, timedelta
+from . import request_timing
 from . import core, read_models
 from .query_cache import QueryCache
 
@@ -229,7 +230,7 @@ def overview_history(period='24h',view='full'):
             return cached[2]
         # Repeated requests for the same key share a lock, not a recalculation.
         lock=_overview_locks.setdefault(key,threading.Lock())
-    with lock:
+    with request_timing.acquire(lock):
         with core.connect() as db:revision=_revision(db)
         now=time.monotonic()
         with _overview_mutex:
@@ -238,7 +239,7 @@ def overview_history(period='24h',view='full'):
                 _overview_cache.move_to_end(key)
                 return cached[2]
         # At most two distinct cache misses can read the SQLite volume concurrently.
-        with _overview_slots:
+        with request_timing.acquire(_overview_slots):
             result=overview_summary(period) if view=='summary' else _overview_history_uncached(period)
         with core.connect() as db:end_revision=_revision(db)
         # If a collector wrote during this read, don't cache an inconsistent version.
