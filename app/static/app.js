@@ -220,7 +220,7 @@ function renderHome(){
  $('.ring-fill').style.strokeDashoffset=String(2*Math.PI*49*(1-(coverage||0)/100));$('.dial-value').style.strokeDashoffset=String(2*Math.PI*37*(1-(coverage||0)/100));
  $('.score-copy>strong').textContent=`${fmt(o?.quality?.sample_count,0)} coletas`;
  $('.score-copy small').textContent='Leitura recente: até 3 min · intervalo médio '+fmt(o?.quality?.observed_interval_mean_seconds,1)+' s';
- $('.hero-score .score-ring').setAttribute('aria-label',`Cobertura da recolha: ${fmt(coverage)} por cento`);
+ $('.hero-score .score-ring').setAttribute('aria-label',`Cobertura temporal da recolha: ${fmt(coverage,2)} por cento`);
  let wan=current?Object.entries(h.wan_states||{}).find(([,v])=>v.services?.includes('Internet'))?.[0]:null;
  const counters=wan?h.interfaces?.[wan]:null;
  $('[data-metric="down"]').textContent=fmt(counters?.rx_bytes==null?null:counters.rx_bytes/2**30,2);
