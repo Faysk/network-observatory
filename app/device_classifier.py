@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 import unicodedata
 
-CLASSIFICATION_VERSION = "router-rules-v3"
+CLASSIFICATION_VERSION = "router-rules-v4"
 CATEGORIES = frozenset((
     "smartphone", "tablet", "laptop", "desktop", "game_console", "smart_tv",
     "streaming_box", "printer", "camera", "robot_vacuum", "network_device",
@@ -203,6 +203,18 @@ def classify_client(client, *, identity=None, history=None):
     names=[_normalize(v) for v in (name_values[:16] if isinstance(name_values,(list,tuple)) else []) if meaningful_name(v)]
     types=[_normalize(v) for v in (type_values[:16] if isinstance(type_values,(list,tuple)) else []) if isinstance(v,str)]
     vendor=_normalize(identity.get('oui_vendor'));global_mac=identity.get('mac_type')=='global'
+    # Tuya is a provider of smart-home/IoT communication modules deployed in
+    # many third-party products. Its registered OUI is a useful broad IoT hint,
+    # not evidence of a plug, light, camera, model or ownership. Do not apply
+    # to locally administered MACs or overwrite a more specific classification.
+    if (not result['conflicts'] and result['category']=='unknown' and global_mac
+            and vendor.rstrip('.') in ('tuya smart inc', 'tuya smart')):
+        result.update(category='iot', confidence='low')
+        result['evidence'].append({
+            'field':'mac', 'rule':'tuya_iot_module_assignee_hint',
+            'source':identity.get('oui_source') or 'ieee_public_assignment',
+            'confidence':'low',
+        })
     if not result['conflicts'] and result['category']=='unknown' and global_mac and vendor.startswith('nintendo'):
         result.update(category='game_console',confidence='low')
         result['evidence'].append({'field':'mac','rule':'nintendo_console_family_hint','source':identity.get('oui_source') or 'ieee_public_assignment','confidence':'low'})
