@@ -7,7 +7,8 @@ import time
 from collections import OrderedDict
 from collections import deque
 from datetime import datetime, timezone, timedelta
-from . import core
+from . import core, read_models
+from .query_cache import QueryCache
 
 PERIODS={'1h':3600,'6h':21600,'12h':43200,'24h':86400,'7d':604800,'1m':2592000,'1y':31536000}
 SOURCE='huawei-b7-http'
@@ -61,7 +62,7 @@ class Buckets:
                            'max_gap_seconds':bucket['max_gap_seconds'],'values':values,**{k:v['avg'] for k,v in values.items()}})
         return points,{k:finish(v) for k,v in self.stats.items()}
 
-def device_history(identifier,period='24h'):
+def _device_history_uncached(identifier,period='24h'):
     mac=device_mac(identifier);start,end=window(period)
     keys=('rssi_dbm','snr_db','link_rx_phy_mbps','link_tx_phy_mbps','download_mbps','upload_mbps','latency_lan_ms','presence')
     buckets=Buckets(start,end,keys);online=0;known=0;segments=deque(maxlen=500);segment=None;previous=None;gap_count=0;latest=None
@@ -71,10 +72,11 @@ def device_history(identifier,period='24h'):
         item['observed_duration_seconds']=max(0,stamp(item['last_observed_at'])-stamp(item['started_at']))
         observed_duration+=item['observed_duration_seconds'];segment_count+=1;segments.append(item)
     with core.connect() as db:
+        db.execute('BEGIN')
         identity=db.execute('SELECT ts,payload FROM router_client_samples WHERE mac=? ORDER BY ts DESC,id DESC LIMIT 1',(mac,)).fetchone()
         if identity is None:raise LookupError('Device not found')
         first=db.execute('SELECT MIN(ts) FROM router_client_samples WHERE mac=?',(mac,)).fetchone()[0]
-        for row in db.execute('SELECT ts,payload FROM router_client_samples WHERE mac=? AND ts>=? AND ts<=? ORDER BY ts,id',(mac,start.isoformat(),end.isoformat())):
+        for row in read_models.device_rows(db,mac,start.isoformat(),end.isoformat()):
             payload=json.loads(row['payload']);point=sample(row['ts'],payload);latest=point
             identity_key=tuple(tuple(payload.get(k,[])) for k in ('names','ips','ports'))
             if identity_key!=previous_identity:
@@ -108,20 +110,26 @@ def device_history(identifier,period='24h'):
             'capabilities':{'client_bytes':'unknown','client_traffic':'unsupported','client_rssi':'supported' if stats['rssi_dbm']['sample_count'] else 'unknown',
                             'phy_rate':'supported' if stats['link_rx_phy_mbps']['sample_count'] else 'unknown','client_probe':'not_configured','exact_sessions':'unsupported'}}
 
+_device_cache = QueryCache()
+
+
+def device_history(identifier,period='24h'):
+    device_mac(identifier)
+    if period not in PERIODS:raise ValueError('Invalid period')
+    def revision():
+        with core.connect() as db:return read_models.router_revision(db)
+    key=(str(core.DB_PATH.resolve()),identifier,period)
+    return _device_cache.get(key,revision(),lambda:_device_history_uncached(identifier,period),revision)
+
+
 def _overview_history_uncached(period='24h'):
     start,end=window(period)
     keys=('cpu_pct','memory_pct','optical_rx_dbm','optical_tx_dbm','wan_rx_bytes','wan_tx_bytes','online_clients','rssi_dbm')
     buckets=Buckets(start,end,keys);probes=Buckets(start,end,('router_ms','internet_ms','router_online','internet_online'))
     with core.connect() as db:
-        for row in db.execute('SELECT ts,payload FROM huawei_samples WHERE ts>=? AND ts<=? ORDER BY ts,id',(start.isoformat(),end.isoformat())):
-            payload=json.loads(row['payload']);p={'timestamp':row['ts'],**payload.get('metrics',{})}
-            wan=next((k for k,v in payload.get('wan_states',{}).items() if 'Internet' in v.get('services',[])),None)
-            counters=payload.get('interfaces',{}).get(wan,{})
-            p.update(wan_rx_bytes=counters.get('rx_bytes'),wan_tx_bytes=counters.get('tx_bytes'))
-            if 'clients' in payload:p['online_clients']=sum(c['reported_status']=='Online' for c in payload['clients'])
-            values=[s['rssi_dbm'] for s in payload.get('stations',[]) if s.get('rssi_dbm') is not None]
-            if values:p['rssi_dbm']=sum(values)/len(values)
-            buckets.add(p)
+        db.execute('BEGIN')
+        for ts,point in read_models.overview_rows(db,start.isoformat(),end.isoformat()):
+            buckets.add({'timestamp':ts,**point})
         for row in db.execute('SELECT * FROM samples WHERE ts>=? AND ts<=? ORDER BY ts,id',(start.isoformat(),end.isoformat())):
             p=dict(row);p['timestamp']=p['ts'];probes.add(p)
         events=[dict(r) for r in db.execute('SELECT * FROM events WHERE ts>=? AND ts<=? ORDER BY ts DESC LIMIT 1001',(start.isoformat(),end.isoformat()))]

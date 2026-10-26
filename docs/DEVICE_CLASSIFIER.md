@@ -1,3 +1,5 @@
+> Estado atual: houve publicação e homologação funcional LAN em25–26/10/2026. As seções históricas abaixo preservam o escopo original; consulte [a revisão integrada](RELEASE_INVENTORY.md) e [consultas compactas/estado atual](READ_MODELS.md). Metas físicas não medidas continuam pendentes. Preferências são administradas via CLI autenticada; não há editor web.
+
 # Classificação prudente de aparelhos — issue #8
 
 ## Contrato

@@ -42,7 +42,7 @@ class HostMonitor:
         self.port=port;self.interval=max(60,interval);self.lock=threading.Lock();self.snapshot_data=empty_snapshot()
         self.stop_event=threading.Event();self.thread=None;self.previous_cpu={};self.previous_net=None;self.previous_process=None
         self.api=deque(maxlen=128);self.collection_ms=None;self.started=time.monotonic();self.last_error=None
-        self.identity=None;self.history_error=None
+        self.identity=None;self.history_error=None;self.projection_error=None
         self.agent_nonce=secrets.token_hex(16)
         self.history_cache={};self.history_lock=threading.Lock()
         self.history_key_locks={};self.history_slots=threading.BoundedSemaphore(2)
@@ -70,6 +70,7 @@ class HostMonitor:
             s['ageSeconds']=round(age,1);s['quality']='stale' if age>self.interval*2.5 else 'ok'
         s['diagnostics']['lastError']=self.last_error
         s['diagnostics']['historyError']=self.history_error
+        s['diagnostics']['chartProjectionError']=self.projection_error
         return s
     def cpu(self):
         current={}
@@ -234,7 +235,7 @@ class HostMonitor:
             'slowRoutes':[{'path':k,'ms':v} for k,v in sorted(api,key=lambda p:p[1],reverse=True)[:5]],
             'dataLocation':str(self.main_db.parent),'pendingSamples':sum(1 for _ in (self.main_db.parent/'outbox').glob('*.json')),
             'agentStatus':agent['status'],'agentAgeSeconds':agent['ageSeconds'],'cpuWindowSec':agent['windowSec'],
-            'samplingIntervalSec':self.interval,'historyRetentionDays':None,'bootAutostart':'Não validado','supervisor':'runit' if os.environ.get('SVDIR') or (Path(os.environ.get('PREFIX','/nonexistent'))/'var/service/l-monitor').exists() else 'Não detectado'}
+            'samplingIntervalSec':self.interval,'historyRetentionDays':None,'bootAutostart':self.boot_status(),'supervisor':'runit' if os.environ.get('SVDIR') or (Path(os.environ.get('PREFIX','/nonexistent'))/'var/service/l-monitor').exists() else 'Não detectado'}
         s['services']=[{'id':'collector','name':'Monitor e coletor Huawei','description':'Processo que fornece esta medição','port':self.port,'status':'running','managedBy':s['diagnostics']['supervisor']}]
         s['availability']={k:{'available':any(isinstance(v,(int,float)) and not isinstance(v,bool) for v in s[k].values()),'source':source,'note':note} for k,source,note in [
             ('cpu','/proc/stat e cpufreq','Percentuais exigem duas amostras; temperatura da CPU não validada.'),
@@ -267,17 +268,34 @@ class HostMonitor:
         with self.lock:self.snapshot_data=s
         self.last_error=None
         return s
+    def boot_status(self):
+        # Configuration is not proof of a physical reboot test.
+        if not (Path.home()/'.termux/boot/10-s7-start').is_file():return 'Não configurado'
+        try:
+            marker=self.main_db.parent/'boot-validation.json'
+            if marker.stat().st_size<=4096:
+                validation=json.loads(marker.read_text())
+                if validation.get('physicalRebootVerified') is True and validation.get('validatedAt'):
+                    return 'Verificado após reboot em '+str(validation['validatedAt'])[:32]
+        except (OSError,ValueError,TypeError):pass
+        return 'Configurado; teste de reboot pendente'
     def persist(self,s):
         # Parent must already exist on the configured volume. No internal fallback.
         if not self.path.parent.is_dir():raise OSError('Configured volume unavailable')
-        with closing(sqlite3.connect(self.path,timeout=2)) as db, db:
+        with closing(sqlite3.connect(self.path,timeout=5)) as db, db:
+            db.execute('PRAGMA journal_mode=WAL')
+            db.execute('PRAGMA synchronous=FULL')
+            db.execute('PRAGMA busy_timeout=5000')
             db.execute('CREATE TABLE IF NOT EXISTS host_samples(ts REAL PRIMARY KEY,payload TEXT NOT NULL)')
+            from .read_models import init_host, project_host, safe_project
+            init_host(db)
             # Cursor stays strictly increasing even if wall-clock is corrected backwards.
             import math
             last=db.execute('SELECT MAX(ts) FROM host_samples').fetchone()[0]
             stamp=time.time()
             if last is not None and stamp<=last:stamp=math.nextafter(last,math.inf)
             db.execute('INSERT INTO host_samples VALUES (?,?)',(stamp,json.dumps(s,allow_nan=False)))
+            self.projection_error=safe_project(db,project_host,stamp)
             # Unlimited retention: chart aggregation never replaces original records.
             db.execute('PRAGMA user_version=2')
         # Only ephemeral aggregation is invalidated, never the original SD archive.
@@ -335,17 +353,10 @@ class HostMonitor:
         # Scan the large raw JSON archive once for all chart metrics in a range.
         # Concurrent cpu/memory/rx/tx readers share the range lock and these results.
         names=list(METRICS)
-        expressions={
-            'memory':"100.0*json_extract(payload,'$.memory.usedMB')/nullif(json_extract(payload,'$.memory.totalMB'),0)",
-            'storage':"100.0*json_extract(payload,'$.storage[0].usedGB')/nullif(json_extract(payload,'$.storage[0].totalGB'),0)"}
-        for name in names:
-            if name not in expressions:
-                section,field=METRICS[name]
-                expressions[name]=f"json_extract(payload,'$.{section}.{field}')"
+        from .read_models import query_host
         with self.history_lock:generation=self.history_generation
-        select=','.join('AVG('+expressions[name]+')' for name in names)
         with closing(sqlite3.connect(self.path.resolve().as_uri()+'?mode=ro',uri=True,timeout=2)) as db:
-            rows=db.execute(f'SELECT MIN(ts),{select} FROM host_samples WHERE ts>=? GROUP BY CAST(ts/? AS INTEGER) ORDER BY MIN(ts)',(time.time()-seconds,bucket)).fetchall()
+            rows=query_host(db,time.time()-seconds,bucket)
         result={name:[] for name in names}
         for row in rows:
             stamp=datetime.fromtimestamp(row[0],timezone.utc).isoformat()

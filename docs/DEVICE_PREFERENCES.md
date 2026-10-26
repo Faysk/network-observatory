@@ -1,3 +1,5 @@
+> Estado atual: houve publicação e homologação funcional LAN em25–26/10/2026. As seções históricas abaixo preservam o escopo original; consulte [a revisão integrada](RELEASE_INVENTORY.md) e [consultas compactas/estado atual](READ_MODELS.md). Metas físicas não medidas continuam pendentes. Preferências são administradas via CLI autenticada; não há editor web.
+
 # Personalização local de identidades — issue #11 — administração local
 
 ## Segurança antes de UX de edição
@@ -20,12 +22,12 @@ FNO_DB=/caminho/no/microsd/observatory.db python tools/device_prefs.py reset 02:
 
 O MAC acima é **fictício**. O CLI rejeita categorias/ícones fora da lista, texto com control chars, MAC inválido e conflito de revisão. Backup: incluir banco SQLite principal/WAL na cópia consistente existente. Não usar disco interno como fallback. O operador pode apagar um override; o histórico original persiste.
 
-## Checklist pendente antes de encerrar #11
+## Checklist histórico — entrega CLI e evolução web
 - [x] Tabela separada, validação, versionamento, CLI local, read-only da UI, `note` privada.
 - [x] Testes sintéticos de persistência, conflito, reset, enum inválido e ausência de mudança no histórico.
-- [ ] Autenticação administrativa web independente e proteção CSRF revisada; escolha segura do mecanismo antes de criar qualquer ação web de escrita.
-- [ ] Formulário acessível de edição, confirmação e cancelamento, sem falso botão quando não autorizado.
-- [ ] Homologação de migração, backup, volume microSD e orçamento do interno >=2 GiB no S7 físico.
+- [ ] Evolução futura: autenticação administrativa web independente e proteção CSRF revisada; escolha segura do mecanismo antes de criar qualquer ação web de escrita.
+- [ ] Evolução futura: formulário acessível de edição, confirmação e cancelamento, sem falso botão quando não autorizado.
+- [x] Migração, backup/restauração, volume microSD e reserva >=2GiB conferidos na publicação26/10.
 
 
 ## Associações reversíveis — issue #12
