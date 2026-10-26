@@ -50,7 +50,7 @@ class MatrixTests(unittest.TestCase):
                 output=Path(folder)/(transport+'.json')
                 with contextlib.redirect_stdout(io.StringIO()):
                     args=['--transport',transport,'--days','1','--samples-per-day','2','--devices','2',
-                          '--payload-kib','0','--trials','1','--periods','1h','24h','7d','--output',str(output)]
+                          '--payload-kib','0','--trials','1','--work-dir',folder,'--periods','1h','24h','7d','--output',str(output)]
                     code=matrix.main(args+(['--include-exports','--include-flows','--gzip'] if transport=='http' else []))
                 self.assertEqual(code,0)
                 data=json.loads(output.read_text(encoding='utf-8'))
@@ -80,7 +80,7 @@ class MatrixTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder)
             args=['--case','s7/history/cpu/7d','--days','1','--samples-per-day','2','--devices','1',
-                  '--payload-kib','0','--trials','1']
+                  '--payload-kib','0','--trials','1','--work-dir',folder]
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(matrix.main(args+['--output',str(root/'v1.json')]),0)
                 baseline=json.loads((root/'v1.json').read_text(encoding='utf-8'))
