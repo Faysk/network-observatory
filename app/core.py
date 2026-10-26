@@ -93,6 +93,10 @@ def init_db():
           id INTEGER PRIMARY KEY, ts TEXT NOT NULL, severity TEXT NOT NULL,
           category TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL, source TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
+        CREATE TABLE IF NOT EXISTS device_presentation_overrides (
+          mac TEXT PRIMARY KEY, nickname TEXT, category TEXT, icon TEXT, note TEXT,
+          revision INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL);
+
         """)
 
 
@@ -273,6 +277,12 @@ def get_archive(kind='huawei',after=0,limit=1000):
 def get_router_clients(mac=None, limit=120):
     """Retained client observations; absence is never inferred as offline."""
     from .adapters.huawei_b7 import normalise_mac,is_lan_client
+    from .device_identity import get_registry, inspect_mac
+    from .device_classifier import classify_client
+    from .device_preferences import read_presentation
+    # One lazy, immutable registry per response; no lookup HTTP or database writes.
+    # Configured main database is expected to live on microSD in S7 deployments.
+    registry = get_registry(DB_PATH.parent) if mac is None else None
     with LOCK,connect() as db:
         if mac is not None:
             if normalise_mac(mac)!=mac or mac is None:raise ValueError('Invalid MAC')
@@ -296,6 +306,10 @@ def get_router_clients(mac=None, limit=120):
             age=(datetime.now(timezone.utc)-datetime.fromisoformat(row['ts'])).total_seconds()
             item.update(first_seen=row['first_seen'],last_seen=row['ts'],observations=row['observations'],
                         quality='ok' if -5<=age<=180 else 'stale')
+            # Read-only API enrichment: the original observation JSON is untouched.
+            item['identity'] = inspect_mac(item.get('mac'), registry=registry)
+            item['classification'] = classify_client(item, identity=item['identity'])
+            item['presentation'] = read_presentation(db, item.get('mac'))
             result.append(item)
         return {'source':'huawei-b7-http','clients':result,'retention_days':RETENTION_DAYS,'retention_unlimited':RETENTION_DAYS==0}
 

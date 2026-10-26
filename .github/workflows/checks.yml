@@ -19,3 +19,4 @@ jobs:
       - run: node tests/test_sheet_requests.cjs
       - run: node --check app/static/app.js
       - run: node tests/browser_smoke.cjs
+      - run: node --check app/static/devices.js
