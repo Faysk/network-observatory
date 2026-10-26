@@ -1,6 +1,7 @@
 /* Read-only source snapshots; all values use textContent, including device labels. */
 (()=>{'use strict';
 const page=document.querySelector('.page');if(!page)return;
+const VM=window.FNOObservabilityView;if(!VM)throw Error('Observability visual model missing');
 const node=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
 const panel=node('section',undefined,'observation-panel');panel.id='routerObservability';panel.tabIndex=-1;panel.setAttribute('aria-labelledby','observationTitle');
 const title=node('h2','Configuração e diagnóstico');title.id='observationTitle';panel.append(title);
@@ -12,9 +13,14 @@ const group=node('select');group.setAttribute('aria-label','Grupo de fontes');
 for(const [value,label] of [['all','Todas as fontes'],['wifi','Wi-Fi'],['clients','Clientes e DHCP'],['network','LAN, WAN e IPv6'],['policies','Políticas e UPnP'],['services','Hardware e serviços']]){const option=node('option',label);option.value=value;group.append(option);}
 const refresh=node('button','Atualizar painel'),download=node('button','Exportar resumo JSON');refresh.type=download.type='button';toolbar.append(group,period,refresh,download);panel.append(toolbar);
 const notice=node('p','','observation-notice');notice.setAttribute('role','status');panel.append(notice);
+const summaryGrid=node('div',undefined,'observation-overview');panel.append(summaryGrid);
+const viewNote=node('p','Selecione uma fonte para inspecionar os dados. Os indicadores mostram valores reportados; não classificam automaticamente a segurança da rede.','observation-reading-note');panel.append(viewNote);
 const cards=node('div',undefined,'observation-cards');panel.append(cards);
-panel.append(node('h3','Histórico de alterações observadas'));
-const changes=node('div');panel.append(changes);
+const timelineTitle=node('div',undefined,'observation-timeline-head');
+timelineTitle.append(node('h3','Histórico de alterações observadas'),node('p','Diferenças detetadas entre amostras sucessivas, não o instante exato da alteração.'));
+panel.append(timelineTitle);
+const changeChart=node('div',undefined,'observation-change-chart');panel.append(changeChart);
+const changes=node('div',undefined,'observation-changes');panel.append(changes);
 const limits=node('details'),limitTitle=node('summary','Limites e significado dos dados');limits.append(limitTitle,node('p','Largura do canal é a política configurada. Limites da rede convidada e alguns tempos são valores reportados cuja escala ainda precisa de confirmação. Tempos DHCP não comprovam duração online. Códigos de política são preservados sem interpretação não validada. Endereços WAN, números de telefone, nomes de ficheiros USB, palavras-passe e PIN WPS são excluídos. Exportações contêm identidades da LAN e devem ser tratadas como privadas.'));
 const unsupported=node('ul');limits.append(unsupported);panel.append(limits);page.append(panel);
 const labels={interface:'Interface',slot:'Entrada',kind:'Tipo',enabled:'Ativo',hidden:'Rede oculta',auto_channel:'Canal automático',channel_reported:'Canal reportado',power_pct:'Potência configurada (%)',width_policy_code:'Política de largura',standard_reported:'Padrão configurado',work_mode_reported:'Modo configurado',auto_channel_scope_reported:'Âmbito do canal automático',mcs_setting:'MCS configurado',rssi_threshold_setting:'Limiar RSSI configurado',rssi_threshold_enabled:'Limiar RSSI ativo',channel_plus_setting:'Canal adicional configurado',wmm:'WMM',pmf:'Proteção de gestão (PMF)',beamforming:'Beamforming',ocac:'OCAC',scs:'SCS',periodic_auto_channel:'Canal automático periódico',qhop:'QHOP',service_enabled:'Serviço ativo',dtim_setting:'DTIM configurado',beacon_setting:'Beacon configurado',rts_threshold:'Limiar RTS',frag_threshold:'Limiar de fragmentação',airtime_fairness:'Airtime fairness',channel_scope:'Âmbito do canal',mu_mimo_enabled:'MU-MIMO configurado',preamble_setting:'Preâmbulo configurado',upload_limit_reported:'Limite de envio (reportado)',download_limit_reported:'Limite de receção (reportado)',lease_seconds_reported:'Duração UPnP (s, reportada)',remote_restricted:'Origem remota restrita',external_port:'Porta externa',internal_port:'Porta interna',protocol:'Protocolo',client_ip:'IP do cliente',description:'Descrição',mac:'MAC',ip:'IP local',name:'Nome reportado',alias:'Apelido reportado',lease_remaining_seconds:'Concessão restante (s)',lease_elapsed_reported_seconds:'Tempo DHCP reportado (s)',type_reported:'Tipo reportado',interface_reported:'Interface reportada',address_source_reported:'Origem do endereço',port_reported:'Porta reportada',ip_type_reported:'Tipo de IP',status_reported:'Estado reportado',port_type_reported:'Tipo de porta',time_reported:'Tempo reportado (escala por validar)',ipv4_enabled:'IPv4 ativo',ipv6_enabled:'IPv6 ativo',category_reported:'Categoria reportada',manual_type_reported:'Categoria definida no router',right_code:'Código de permissão',policy_code:'Código de política',level_code:'Código de nível',protocol_code:'Código de protocolo',wan_ref:'Referência WAN',source_restricted:'Origem restrita',connection_state:'Estado da ligação',encapsulation_reported:'Encapsulamento',dns_present:'DNS presente',aftr_present:'AFTR presente',gateway_present:'Gateway presente',uptime_seconds_reported:'Tempo IPv6 reportado (s)',origin_reported:'Origem reportada',present:'Presente',preferred_seconds_reported:'Validade preferida (s)',valid_seconds_reported:'Validade (s)',remaining_seconds_reported:'Tempo restante (s)',method_reported:'Método WPS',mlo_enabled:'MLO configurado',safe_remove_reported:'Remoção segura reportada',registration_state:'Estado do registo',call_state_reported:'Estado da chamada',registration_error:'Erro de registo',band:'Banda',component_reported:'Componente Wi-Fi reportado',lease_duration_seconds_reported:'Duração DHCP (s)',dns_override_present:'DNS personalizado presente',server_present:'Servidor presente',override_allowed:'Substituição permitida',managed:'Endereços geridos',other_config:'Outra configuração',l3_enabled:'Camada 3 ativa',mode_reported:'Modo reportado',vlan_reported:'VLAN',multicast_vlan_enabled:'VLAN multicast ativa',multicast_vlan_reported:'VLAN multicast',start_reported:'Início',end_reported:'Fim',repeat_days_code:'Código dos dias',ssid_mask_code:'Código da seleção de redes',filter_right:'Permissão MAC',filter_policy:'Política MAC',wlan_filter_right:'Permissão MAC Wi-Fi',wlan_filter_policy:'Política MAC Wi-Fi',port:'Porta',user_count:'Utilizadores configurados',share_all:'Partilha total configurada',wan_enabled:'Acesso WAN configurado',subnet_mask:'Máscara LAN',nat_enabled:'NAT configurado',services_reported:'Serviços WAN',connection_type_reported:'Tipo de ligação',backhaul_reported:'Backhaul reportado'};
@@ -40,15 +46,172 @@ async function historyPage(source,output,button,after=0){
 function state(){const c=window.FNO?.state?.status?.collector;collector.textContent=c?({ok:'Coletor ativo',collecting:'Recolha em curso',auth_blocked:'Autenticação bloqueada. O painel e o histórico continuam disponíveis; verificar acesso e reiniciar o serviço para retomar.',backoff:'Coletor em espera após falha. Histórico disponível.',not_started:'Coletor ainda sem estado nesta execução.'}[c.state]||'Estado desconhecido'):'Estado do coletor indisponível';collector.dataset.state=c?.state||'unknown';}
 document.addEventListener('fno:update',state);state();
 function table(data,source){const wrap=node('div',undefined,'observation-table');wrap.tabIndex=0;wrap.setAttribute('role','region');wrap.setAttribute('aria-label','Dados de '+source.title);const t=node('table'),head=node('thead'),tr=node('tr'),body=node('tbody');const keys=[...new Set(data.flatMap(r=>Object.keys(r)))];for(const k of keys){const th=node('th',labels[k]||k);th.scope='col';tr.append(th);}head.append(tr);t.append(head);for(const row of data){const r=node('tr');for(const k of keys){let v=row[k];if(k==='width_policy_code'&&v!=null)v=payload.width_policies?.[v]??`Código ${v}`;r.append(node('td',v==null?'Sem dados':v===true?'Sim':v===false?'Não':String(v)));}body.append(r);}t.append(body);wrap.append(t);return wrap;}
-function render(data){const opened=new Set([...cards.querySelectorAll('details[open]')].map(n=>n.dataset.source));cards.replaceChildren();for(const source of data.sources.filter(s=>group.value==='all'||groups[group.value]?.includes(s.id))){const card=node('details',undefined,'observation-source');card.dataset.source=source.id;card.open=opened.has(source.id);const summary=node('summary',`${source.title} · ${{ok:'Atual',stale:'Leitura antiga',unavailable:'Sem dados'}[source.quality]||'Sem dados'}`);card.append(summary,node('p',`Última leitura válida: ${time(source.collected_at)}${source.age_seconds==null?'':` · há ${source.age_seconds} s`}. Última tentativa: ${source.attempt_status==='ok'?'disponível':source.attempt_status==='not_collected'?'ainda não recolhida':'indisponível'}${source.reason?` (${{schema:'formato não reconhecido',transport:'falha de comunicação',http:'falha HTTP',authentication:'autenticação',budget:'limite de tempo da recolha'}[source.reason]||'falha'})`:''}.`));if(source.data?.length)card.append(table(source.data,source));else card.append(node('p',source.data?'Nenhum registo nesta leitura.':'Nenhuma leitura válida disponível.'));
-const history=node('button','Consultar observações guardadas');history.type='button';const output=node('div');history.addEventListener('click',()=>historyPage(source,output,history));card.append(history,output);cards.append(card);}
-changes.replaceChildren();if(!data.changes.length)changes.append(node('p','Nenhuma diferença observada neste período. A primeira leitura estabelece a referência.'));
-for(const c of data.changes){
- const s=data.sources.find(s=>s.id===c.source)||{title:c.source},d=c.detail,entry=node('details');
- entry.append(node('summary',`${s.title} · entre ${time(c.previous_at)} e ${time(c.observed_at)}${c.crosses_gap?' · atravessa uma lacuna':''}`),node('p',`${d.before_count} → ${d.after_count} registos. Campos: ${d.changed_fields.map(k=>labels[k]||k).join(', ')||'composição dos registos'}${d.added!=null?` · ${d.added} adicionados, ${d.removed} removidos`:''}.`));
- const compare=node('button','Comparar leituras'),output=node('div');compare.type='button';compare.addEventListener('click',async()=>{compare.disabled=true;try{const result=await get(`/api/router/observability/change?id=${c.id}`);output.replaceChildren();for(const [key,label] of [['before','Antes'],['after','Depois']]){output.append(node('h4',label));if(result[key]?.length)output.append(table(result[key],s));else output.append(node('p',result[key]?'Nenhum registo.':'Observação já não disponível na retenção atual.'));}}catch{output.replaceChildren(node('p','Comparação indisponível.'));}finally{compare.disabled=false;}});entry.append(compare,output);changes.append(entry);
+function badge(text,variant='neutral'){
+ const b=node('span',text,'observation-badge '+variant);return b;
 }
-if(data.changes_truncated)changes.append(node('p','A prévia mostra até 500 alterações. Use um período menor; os dados originais permanecem no arquivo.'));unsupported.replaceChildren(...Object.values(data.unsupported).map(v=>node('li',v)));notice.textContent=`${data.sources.filter(s=>s.quality==='ok').length}/${data.sources.length} fontes atuais · consulta ${time(new Date().toISOString())}.`;
+function metric(label,value,note=''){
+ const m=node('div',undefined,'observation-metric');
+ m.append(node('span',label,'observation-metric-name'),node('strong',String(value),'observation-metric-value'));
+ if(note)m.append(node('small',note,'observation-metric-note'));
+ return m;
+}
+function readable(key,value){
+ if(key==='width_policy_code'&&value!==null&&value!==undefined)return payload?.width_policies?.[value]||'Código '+value;
+ if(value===true)return 'Sim';
+ if(value===false)return 'Não';
+ if(value===null||value===undefined||value==='')return 'Sem dados';
+ return String(value);
+}
+function sourceOverview(source){
+ const h=VM.header(source),n=VM.highlights(source);
+ const result=node('div',undefined,'observation-quick');
+ result.append(metric(h.noun,source.data===null?'—':h.count,source.data===null?'Ainda não existe leitura válida':h.description));
+ if(source.data?.length&&n.length){
+   for(const x of n.slice(0,3))result.append(metric(x.label,x.value,x.meaning));
+ }
+ if(source.data?.length){
+   const overview=VM.distribution(source);
+   if(overview && overview.items.length){
+     const graph=node('div',undefined,'observation-distribution'),heading=node('div',undefined,'observation-graphic-title');
+     heading.append(node('strong','Distribuição dos registos'),node('small','Contagem por '+(labels[overview.field]||overview.field)));
+     graph.append(heading);
+     const max=Math.max(...overview.items.map(x=>x.count),1);
+     for(const item of overview.items){
+       const r=node('div',undefined,'observation-bar-row');
+       r.append(node('span',item.label,'observation-bar-name'));
+       const track=node('span',undefined,'observation-bar-track'),fill=node('span',undefined,'observation-bar-fill');
+       fill.style.width=(100*item.count/max).toFixed(1)+'%';
+       track.append(fill);
+       r.append(track,node('strong',String(item.count),'observation-bar-number'));
+       graph.append(r);
+     }
+     result.append(graph);
+   }
+ }
+ if(source.id==='station_details' && Array.isArray(source.data)){
+   const stations=source.data.filter(r=>typeof r.rssi_dbm==='number'&&Number.isFinite(r.rssi_dbm));
+   if(stations.length){
+     const gauge=node('div',undefined,'observation-stations');
+     gauge.append(node('h4','Sinal por estação · RSSI'));
+     gauge.append(node('p','Escala visual −100 a −30 dBm. É sinal medido pelo AP para cada estação, não uma pontuação de qualidade.'));
+     for(const r of stations.slice(0,8)){
+       const entry=node('div',undefined,'observation-station');
+       const label=node('span',r.description||r.interface||'Estação','observation-station-name');
+       const track=node('div',undefined,'observation-signal-track'),dot=node('span',undefined,'observation-signal-dot');
+       dot.style.left=(Math.max(0,Math.min(1,(r.rssi_dbm+100)/70))*100).toFixed(1)+'%';
+       track.append(dot);
+       entry.append(label,track,node('strong',r.rssi_dbm+' dBm'));
+       gauge.append(entry);
+     }
+     if(stations.length>8)gauge.append(node('small',stations.length-8+' estações adicionais disponíveis na tabela.'));
+     result.append(gauge);
+   }
+ }
+ return result;
+}
+function technical(source){
+ const raw=node('details',undefined,'observation-raw'),head=node('summary','Inspecionar tabela técnica · '+(source.data?.length||0)+' linhas');
+ const contents=node('div',undefined,'observation-raw-body');
+ raw.append(head,contents);
+ raw.addEventListener('toggle',()=>{
+   if(raw.open&&!contents.childNodes.length){
+     if(source.data?.length)contents.append(table(source.data,source));
+     else contents.append(node('p',source.data?'Nenhum registo nesta leitura.':'Leitura ainda indisponível.'));
+   }
+ });
+ return raw;
+}
+function renderSources(data){
+ const opened=new Set([...cards.querySelectorAll('details.observation-source[open]')].map(n=>n.dataset.source));
+ cards.replaceChildren();
+ const countsBySource=new Map();
+ for(const c of data.changes)countsBySource.set(c.source,(countsBySource.get(c.source)||0)+1);
+ const all=VM.sections(data.sources);
+ const allowed=group.value==='all'?all:all.filter(section=>section.id===group.value);
+ for(const section of allowed){
+   const sectionBox=node('section',undefined,'observation-section');
+   sectionBox.id='diagnostic-'+section.id;
+   const header=node('div',undefined,'observation-section-head');
+   const heading=node('div');
+   heading.append(node('h3',section.title),node('p',section.description));
+   header.append(heading,badge(section.sources.filter(s=>s.quality==='ok').length+'/'+section.sources.length+' atuais'));
+   sectionBox.append(header);
+   const grid=node('div',undefined,'observation-section-grid');
+   for(const source of section.sources){
+     const h=VM.header(source);
+     const card=node('details',undefined,'observation-source');card.dataset.source=source.id;card.open=opened.has(source.id);
+     if(source.quality!=='ok')card.dataset.quality=source.quality;
+     const summary=node('summary',undefined,'observation-source-summary');
+     const lead=node('span',undefined,'observation-source-lead');
+     lead.append(node('span',source.title,'observation-source-title'));
+     lead.append(node('small',h.description,'observation-source-description'));
+     const bottom=node('span',undefined,'observation-source-meta');
+     bottom.append(node('span',source.data===null?'Sem leitura válida':h.noun+': '+h.count));
+     if(countsBySource.has(source.id))bottom.append(badge(countsBySource.get(source.id)+' alterações','modified'));
+     lead.append(bottom);
+     const quality=source.quality==='ok'?'Atual':source.quality==='stale'?'Leitura antiga':'Indisponível';
+     const flags=node('span',undefined,'observation-source-flags');
+     flags.append(badge(quality,source.quality==='ok'?'present':source.quality==='stale'?'aged':'missing'));
+     summary.append(lead,flags);card.append(summary);
+     const content=node('div',undefined,'observation-source-content');
+     content.append(node('p','Última leitura válida: '+time(source.collected_at)+(source.age_seconds==null?'':' · há '+source.age_seconds+' s')+'. Última tentativa: '+(source.attempt_status==='ok'?'disponível':source.attempt_status==='not_collected'?'não recolhida':'indisponível')+(source.reason?' · '+({schema:'formato não reconhecido',transport:'falha de comunicação',http:'falha HTTP',authentication:'autenticação',budget:'limite de tempo'}[source.reason]||'falha'):'')+'.','observation-provenance'));
+     content.append(sourceOverview(source),technical(source));
+     const actions=node('div',undefined,'observation-source-actions');
+     const history=node('button','Consultar observações guardadas');history.type='button';
+     const output=node('div',undefined,'observation-archive');
+     history.addEventListener('click',()=>historyPage(source,output,history));
+     actions.append(history);content.append(actions,output);
+     card.append(content);grid.append(card);
+   }
+   sectionBox.append(grid);cards.append(sectionBox);
+ }
+}
+function renderSummary(data){
+ summaryGrid.replaceChildren();
+ const x=VM.summary(data.sources,data.changes);
+ for(const [label,value,help] of [
+   ['Fontes atuais',x.current+' / '+x.total,'Respondem com leitura válida recente'],
+   ['Com leitura antiga',x.old,'Dados preservados, sem confirmação atual'],
+   ['Registos reportados',x.records,'Soma de linhas das últimas leituras; não aparelhos únicos'],
+   ['Alterações no período',x.changes+(data.changes_truncated?'+':''),'Diferenças observadas; prévia limitada a 500']]){
+   const tile=metric(label,value,help);tile.classList.add('observation-kpi');summaryGrid.append(tile);
+ }
+}
+function renderChanges(data){
+ changes.replaceChildren();changeChart.replaceChildren();
+ const h=VM.changeBins(data.changes,data.hours);
+ if(h.length){
+   const full=node('div',undefined,'observation-change-axis');
+   const bars=node('div',undefined,'observation-change-bars');
+   bars.setAttribute('role','img');bars.setAttribute('aria-label','Distribuição de '+data.changes.length+' alterações observadas no período selecionado'+(data.changes_truncated?'; prévia incompleta':''));
+   const max=Math.max(...h.map(x=>x.count),1);
+   for(const item of h){
+     const col=node('span',undefined,'observation-change-column');
+     const bar=node('span',undefined,'observation-change-column-fill');
+     bar.style.height=(item.count>0?Math.max(5,100*item.count/max):0)+'%';
+     col.title=item.count+' alterações entre '+time(item.start)+' e '+time(item.end);
+     col.append(bar);bars.append(col);
+   }
+   full.append(node('span',time(h[0].start)),node('span',time(h[h.length-1].end)));
+   changeChart.append(node('h4','Distribuição temporal das diferenças registadas'),bars,full);
+   if(data.changes_truncated)changeChart.append(node('p','Prévia incompleta: foram retornadas apenas as primeiras 500 alterações. O gráfico não representa a totalidade do período.'));
+ }
+ if(!data.changes.length)changes.append(node('p','Nenhuma diferença observada neste período. A primeira leitura estabelece a referência. Ausência de alterações não comprova que a configuração nunca mudou.'));
+ for(const c of data.changes){
+   const source=data.sources.find(s=>s.id===c.source)||{title:c.source},d=c.detail,entry=node('details',undefined,'observation-change');
+   const title=node('summary',undefined);
+   title.append(node('strong',source.title),node('time',time(c.observed_at)),badge(c.crosses_gap?'Atravessa lacuna':'Mudança observada',c.crosses_gap?'aged':'modified'));
+   entry.append(title,node('p',d.before_count+' → '+d.after_count+' registos. Campos: '+(d.changed_fields.map(k=>labels[k]||k).join(', ')||'composição dos registos')+(d.added!=null?' · '+d.added+' adicionados, '+d.removed+' removidos':'')+'. Janela entre '+time(c.previous_at)+' e '+time(c.observed_at)+'.'));
+   const compare=node('button','Comparar leituras'),output=node('div');compare.type='button';compare.addEventListener('click',async()=>{compare.disabled=true;try{const result=await get('/api/router/observability/change?id='+c.id);output.replaceChildren();for(const [key,label] of [['before','Antes'],['after','Depois']]){output.append(node('h4',label));if(result[key]?.length)output.append(table(result[key],source));else output.append(node('p',result[key]?'Nenhum registo.':'Observação já não disponível na retenção atual.'));}}catch{output.replaceChildren(node('p','Comparação indisponível.'));}finally{compare.disabled=false;}});entry.append(compare,output);changes.append(entry);
+ }
+ if(data.changes_truncated)changes.append(node('p','A prévia mostra até 500 alterações. Use um período menor; os registos originais permanecem no arquivo.'));
+}
+function render(data){
+ renderSummary(data);
+ renderSources(data);
+ renderChanges(data);
+ unsupported.replaceChildren(...Object.values(data.unsupported||{}).map(v=>node('li',v)));
+ notice.textContent=data.sources.filter(s=>s.quality==='ok').length+'/'+data.sources.length+' fontes atuais · consulta '+time(new Date().toISOString())+'.';
 }
 async function load(){if(busy)return;busy=true;refresh.disabled=true;notice.textContent='A consultar leituras guardadas…';try{payload=await get(`/api/router/observability?hours=${period.value}`);render(payload);}catch{notice.textContent='API indisponível. Os valores apresentados pertencem à última consulta bem-sucedida.';}finally{busy=false;refresh.disabled=false;}}
 refresh.addEventListener('click',load);period.addEventListener('change',load);download.addEventListener('click',()=>{if(!payload)return;const url=URL.createObjectURL(new Blob([JSON.stringify(payload,null,2)],{type:'application/json'})),a=node('a');a.href=url;a.download='router-observations-private.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});load();setInterval(()=>{if(!document.hidden&&!panel.contains(document.activeElement))load();},60000);
