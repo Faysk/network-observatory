@@ -28,7 +28,7 @@ function identitySubtitle(c){
  const suffix=platform&&!(categoryOf(c)==='android_device'&&platform==='Android')?' · '+platform:'';
  return label+suffix;
 }
-function row(c){return `<button class="device-list-row" data-open-device="${c.id}" aria-label="Ver detalhes e histórico de ${esc(c.name)}; ${esc(categoryLabel(c))}"><span class="device-label"><span class="device-avatar category-${categoryOf(c)}">${iconMarkup(c)}</span><span class="device-label-text"><strong>${esc(c.name)}</strong><small>${esc(identitySubtitle(c))}</small></span></span><span class="device-col"><small>Estado</small><span class="device-status ${!c.recent||c.reported_status!=='Online'?'offline':''}">${esc(status(c))}</span></span><span class="device-col"><small>Interface</small><strong>${esc(c.network==='wired'?'Ethernet':c.network==='wifi'?'Wi-Fi':'Não determinada')}</strong></span><span class="device-col"><small>Sinal / ligação</small><strong>${c.recent&&c.station.rssi_dbm!=null?fmt(c.station.rssi_dbm)+' dBm':c.network==='wired'?'Cabo LAN':'Sem dados'}</strong></span><span class="device-col"><small>Último IP reportado</small><strong>${esc(c.ips?.[0]||'Sem dados')}</strong></span><svg class="ic device-row-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></button>`;}
+function row(c){const link=Inventory.connection(c,app.status?.huawei);return `<button class="device-list-row" data-open-device="${c.id}" aria-label="Ver detalhes e histórico de ${esc(c.name)}; ${esc(categoryLabel(c))}"><span class="device-label"><span class="device-avatar category-${categoryOf(c)}">${iconMarkup(c)}</span><span class="device-label-text"><strong>${esc(c.name)}</strong><small>${esc(identitySubtitle(c))}</small></span></span><span class="device-col"><small>Estado</small><span class="device-status ${!c.recent||c.reported_status!=='Online'?'offline':''}">${esc(status(c))}</span></span><span class="device-col"><small>Interface</small><strong>${esc(c.network==='wired'?'Ethernet':c.network==='wifi'?'Wi-Fi':'Não determinada')}</strong></span><span class="device-col"><small>Sinal / ligação</small><strong title="${esc(link.title)}">${esc(link.label)}</strong></span><span class="device-col"><small>Último IP reportado</small><strong>${esc(c.ips?.[0]||'Sem dados')}</strong></span><svg class="ic device-row-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></button>`;}
 function filtered(){return Inventory.select(Array.isArray(app.clients)?app.clients:[],state);}
 function inventorySkeletons(){return window.FNO.loading?Array.from({length:4},()=>window.FNO.loading('Carregando dispositivo…',true)).join(''):empty('Carregando inventário…');}
 function renderList(){
@@ -247,7 +247,7 @@ $('#devicePeriods').addEventListener('click',e=>{const el=e.target.closest('[dat
 $('#deviceTabs').addEventListener('click',e=>{const el=e.target.closest('[data-dtab]');if(el){state.tab=el.dataset.dtab;render();}});
 $('#deviceExportCsv').addEventListener('click',()=>exportFile('csv'));$('#deviceExportJson').addEventListener('click',()=>exportFile('json'));
 document.addEventListener('fno:update',()=>{
- const signature=JSON.stringify([app.clients,app.resources?.inventory?.phase]);
+ const signature=JSON.stringify([app.clients,app.resources?.inventory?.phase,app.status?.huawei?.interfaces,app.status?.huawei?.collected_at,app.status?.huawei?.quality]);
  if(signature===lastInventorySignature)return;
  lastInventorySignature=signature;
  renderList();

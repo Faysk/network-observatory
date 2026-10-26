@@ -51,3 +51,18 @@ assert.equal(saved.name,'Meu dispositivo');
 assert.equal(saved.effectiveCategory,'tablet');
 
 console.log('Inventory: 19/1000 identities, combined filters, stale semantics, ordering and manual precedence passed.');
+
+// Fresh negotiated port speed, never inferred from device model or Internet speed.
+const now=Date.now(),at=new Date(now).toISOString();
+const wired=inv.prepare({...sample(0),quality:'ok',reported_status:'Online',last_seen:at,ports:['ETH:LAN4','InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.4']});
+const h={quality:'ok',collected_at:at,interfaces:{lan4:{link_up:true,speed_mbps:2500,duplex:'full'}}};
+for(const [speed,label] of [[10,'10 Mb/s'],[100,'100 Mb/s'],[1000,'1 Gb/s'],[2500,'2,5 Gb/s'],[5000,'5 Gb/s'],[10000,'10 Gb/s']]){
+ h.interfaces.lan4.speed_mbps=speed;assert.equal(inv.connection(wired,h,now).label,label);
+}
+for(const client of [{...wired,reported_status:'Offline'},{...wired,quality:'stale'},{...wired,last_seen:new Date(now-181000).toISOString()},{...wired,ports:['ETH:LAN3','ETH:LAN4']},{...wired,ports:['Ethernet']},{...wired,ports:['ETH:LAN40']}])assert.equal(inv.connection(client,h,now).label,'Velocidade indisponível');
+assert.equal(inv.connection(wired,{...h,quality:'stale'},now).label,'Velocidade indisponível');
+assert.equal(inv.connection(wired,{...h,collected_at:new Date(now-181000).toISOString()},now).label,'Velocidade indisponível');
+h.interfaces.lan4.link_up=false;assert.equal(inv.connection(wired,h,now).label,'Velocidade indisponível');
+h.interfaces.lan4.link_up=true;h.interfaces.lan4.speed_mbps=null;assert.equal(inv.connection(wired,h,now).label,'Velocidade indisponível');
+assert.equal(inv.connection(inv.prepare({...sample(1),quality:'ok',reported_status:'Online'}),h,now).label,'-50 dBm');
+console.log('Ethernet negotiated link tests passed');
