@@ -367,6 +367,30 @@ def archive(db,source,after=0,limit=100):
 
 
 
+
+def archive_recent(db,source,before=0,limit=50):
+    """Page newest-to-oldest using indexed IDs; preserve original archive API."""
+    before=int(before);limit=int(limit)
+    if source not in SOURCES or not 0<=before<=2**63-1 or not 1<=limit<=100:
+        raise ValueError('observation_cursor')
+    if before:
+        sql='SELECT * FROM router_observations WHERE source=? AND id<? ORDER BY id DESC LIMIT ?'
+        params=(source,before,limit+1)
+    else:
+        sql='SELECT * FROM router_observations WHERE source=? ORDER BY id DESC LIMIT ?'
+        params=(source,limit+1)
+    records=[dict(row) for row in db.execute(sql,params)]
+    more=len(records)>limit
+    records=records[:limit]
+    for row in records:
+        raw=row.pop('payload')
+        row['data']=json.loads(raw) if raw is not None else None
+    return {'source':source,'records':records,'has_more':more,
+            'next_before':records[-1]['id'] if records else before,
+            'order':'newest_first'}
+
+
+
 # Single-source history is intentionally opt-in. This is not a full archive scan:
 # a bounded suffix is streamed from the indexed source/time range, projected to
 # numeric summaries, and never returns private row bodies or per-device identity.
