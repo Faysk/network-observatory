@@ -93,7 +93,7 @@ function blockFeedback(node,name){
 function updateResourceRegions(){
  $$('.telemetry-mini').forEach(node=>blockFeedback(node,'status'));
  document.body.dataset.initialLoading=String(!state.status&&state.resources.status.phase==='loading');
- for(const [selector,name] of [['.metric-card[data-detail="traffic"]','status'],['.metric-card[data-detail="latency"]','status'],['.metric-card[data-detail="router"]','status'],['.metric-card[data-detail="devices"]','inventory'],['.hero-main','status'],['.hero-score','overview'],['.traffic-summary-values','status'],['.event-preview','overview'],['.signal-foot','status'],['.signal-main','overview'],['#deviceSection','inventory']])blockFeedback($(selector),name);
+ for(const [selector,name] of [['.metric-card[data-detail="traffic"]','overview'],['.metric-card[data-detail="latency"]','status'],['.metric-card[data-detail="router"]','status'],['.metric-card[data-detail="devices"]','inventory'],['.hero-main','status'],['.hero-score','overview'],['.traffic-summary-values','status'],['.event-preview','overview'],['.signal-foot','status'],['.signal-main','overview'],['#deviceSection','inventory']])blockFeedback($(selector),name);
  for(const [name,id,label] of [['overview','#overviewState','histórico'],['inventory','#inventoryState','inventário']]){
    const el=$(id);if(!el)continue;
    const phase=state.resources[name].phase;
