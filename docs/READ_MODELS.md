@@ -46,3 +46,21 @@ Dossiês compartilham a mesma consulta em voo e um cache RAM de20s, até8entrada
 ## Ensaio no aparelho sobre cópias consistentes
 
 No S7/microSD, com mesmas janelas e resultados completos exatamente iguais: CPU7d de3589ms para25,7ms; overview24h1153→305ms e7d3346→840ms; dossiê24h148→132ms e7d432→375ms. Rodada única, com cache físico não controlado; não confundir com SLA ou cold boot. A igualdade SHA-256 dos registros brutos dos cinco conjuntos foi conferida. Projeções acrescentaram~25MiB ao banco Router e280KiB ao host nesse volume. O ganho do dossiê frio foi menor que o dos gráficos S7; a camada de chamadas compartilhadas e cache limitado trata repetição/concorrência, cuja medição HTTP será feita após deploy.
+
+
+## Publicação LAN e chamadas simultâneas — 26/10/2026
+
+Versão19d9211 publicada após backup consistente do banco Router/host e código. Migração online:78192observações Router em102,61s,3244host em10,22s, mais um pequeno delta na troca; coletor manteve sua cadência e o intervalo de autenticação foi respeitado no restart. Os hashes SHA-256 de todos os registros anteriores das cinco tabelas foram comparados com os backups e permaneceram idênticos.24arquivos do manifesto conferidos;171arquivos privados de configuração/Vault e o servidor privado preservados.
+
+Medição HTTP real emLAN, primeiroGET antes e cincoGETs depois:
+
+|Consulta|Antes (primeiro observado)|Depois (primeiro observado)|Depois (repetições)|
+|---|---:|---:|---:|
+|Dossiê24h|2478ms|516ms|178–224ms|
+|Dossiê7d|7681ms|586ms|91–127ms|
+|CPU S7 7d|19883ms|93ms|26–45ms|
+|Overview completo7d|15185ms|1064ms|109–151ms|
+
+4GETs simultâneos: dossiê7d378–559ms eCPU7d25–53ms. Todos200. Rodadas não têm cache físico/concorrência idênticos; antes houve outras leituras de homologação no SD e o arquivo continua recebendo dados. Os números mostram a experiência observada, não garantem fator de ganho universal; o ensaio sobre cópias fixas acima separa o ganho do plano de consulta. Não foram calculados p95/INP/FPS com estas amostras.
+
+111testes Python locais/CI aprovados e24específicos no S7. Navegação real após publicar: resumo/inventárioRouter prontos, dossiê com gráfico/exportação após loading, dois gráficos7dS7 prontos sem retry ou busy. RSS de amostra~37,8MiB, gravação anterior do host306ms, semerro de histórico/projeção. Boot configurado e app aberto; teste físico ainda pendente à hora deste registro.
