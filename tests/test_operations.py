@@ -55,7 +55,6 @@ class OperationsTests(unittest.TestCase):
         self.assertEqual(response['alerts'],[])
         self.assertEqual(response['health']['processRssMB'],40)
         self.assertIsNone(response['health']['growthMBPerDay'])
-        self.assertIsNone(response['health']['volumeFreeGiB'] if False else None)
         self.assertEqual(response['health']['volumeFreeGiB'],10)
         self.assertEqual(response['rulesSource'],'injected' if False else 'defaults')
 
