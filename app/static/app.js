@@ -216,7 +216,7 @@ function renderHome(){
  $('.hero-main p').textContent=probeCurrent?`Gateway: ${probe.router_online==null?'sem dados':probe.router_online?'responde':'sem resposta TCP'} · exterior: ${probe.internet_online==null?'sem dados':probe.internet_online?'responde':'sem resposta TCP'}.`:'Sem sondas TCP recentes para avaliar a conectividade.';
  const coverage=o?.quality?.coverage_percent;
  $('.signal-main p').textContent='Percentual da janela com uma coleta gravada há no máximo 3 minutos. Não é disponibilidade da Internet.';
- $('[data-metric="score"]').textContent=fmt(coverage,1);$('.quality-dial strong').textContent=fmt(coverage,1);
+ $('[data-metric="score"]').textContent=fmt(coverage,2);$('.quality-dial strong').textContent=fmt(coverage,2);
  $('.ring-fill').style.strokeDashoffset=String(2*Math.PI*49*(1-(coverage||0)/100));$('.dial-value').style.strokeDashoffset=String(2*Math.PI*37*(1-(coverage||0)/100));
  $('.score-copy>strong').textContent=`${fmt(o?.quality?.sample_count,0)} coletas`;
  $('.score-copy small').textContent='Leitura recente: até 3 min · intervalo médio '+fmt(o?.quality?.observed_interval_mean_seconds,1)+' s';
