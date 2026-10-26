@@ -203,3 +203,24 @@
 @media(prefers-reduced-motion:reduce){
  .observation-filter-chip,.observation-source-summary::after{transition:none}
 }
+
+/* Jump-first overview: five domain cards plus full overview, all backed by 28 sources. */
+.observation-category-nav{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin:18px 0 19px}
+.observation-category-card{min-width:0;display:flex;flex-direction:column;align-items:stretch;text-align:left;gap:12px;
+ padding:14px!important;border:1px solid #453753!important;border-radius:14px!important;background:linear-gradient(150deg,#251a32,#1b1626)!important;
+ color:#f0defa!important;transition:transform .14s,border-color .14s,background .14s}
+.observation-category-card:hover{border-color:#9b79bb!important;transform:translateY(-2px)}
+.observation-category-card[aria-pressed="true"]{border-color:#b789d7!important;background:linear-gradient(150deg,#402a52,#251c35)!important;
+ box-shadow:0 0 0 1px rgba(213,162,242,.12),0 7px 19px rgba(0,0,0,.1)}
+.observation-category-top{display:flex;gap:8px;align-items:center;justify-content:space-between}
+.observation-category-top strong{font-size:.77rem;font-weight:750;overflow-wrap:anywhere}
+.observation-category-total{font-size:.72rem;font-weight:700;color:#ddbae9;font-variant-numeric:tabular-nums;white-space:nowrap}
+.observation-category-meter{height:6px;border-radius:12px;background:#3c2e4b;overflow:hidden}
+.observation-category-meter-fill{display:block;height:100%;border-radius:12px;background:linear-gradient(90deg,#9b89d6,#71d6c8)}
+.observation-category-card small{font-size:.67rem;color:#bcaac7;line-height:1.4}
+.observation-category-card[aria-pressed="true"] small{color:#e0c9eb}
+@media(max-width:1360px){.observation-category-nav{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:700px){.observation-category-nav{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:13px}
+.observation-category-card{padding:11px!important;gap:9px}
+.observation-category-card small{font-size:.63rem}}
+@media(prefers-reduced-motion:reduce){.observation-category-card{transition:none}.observation-category-card:hover{transform:none}}
