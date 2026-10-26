@@ -9,11 +9,11 @@ from __future__ import annotations
 import re
 import unicodedata
 
-CLASSIFICATION_VERSION = "router-rules-v1"
+CLASSIFICATION_VERSION = "router-rules-v2"
 CATEGORIES = frozenset((
     "smartphone", "tablet", "laptop", "desktop", "game_console", "smart_tv",
     "streaming_box", "printer", "camera", "robot_vacuum", "network_device",
-    "iot", "unknown",
+    "iot", "computer", "android_device", "unknown",
 ))
 PLATFORMS = frozenset(("android", "ios", "windows", "linux", "macos", "unknown"))
 QUALITY = ("unknown", "low", "medium", "high")
@@ -87,8 +87,13 @@ def classify_client(client, *, identity=None):
     platform_claims = []
     seen = set()
     name_suggestion = None
+    normalized_names = []
+    msft_dhcp_reported = False
+    android_dhcp_reported = False
 
     for field, value in _texts(client):
+        if field == "names":
+            normalized_names.append(value)
         # Neither raw MAC names nor interface labels are display-name suggestions.
         if field == "names" and name_suggestion is None and value not in ("wlan0", "wifi", "eth0", "unknown") and not re.fullmatch(r"[0-9a-f:.-]{12,17}", value):
             name_suggestion = next((name[:120] for name in client.get("names", []) if isinstance(name, str) and _normalize(name) == value), None)
@@ -109,11 +114,15 @@ def classify_client(client, *, identity=None):
             claims.append((category, strength, field))
             if platform:
                 platform_claims.append(platform)
+        if field == "device_types" and "msft 5.0" in value:
+            msft_dhcp_reported = True
         for rule, regex, platform, strength in PLATFORM_TYPES:
             if regex.search(value) and (field, rule) not in seen:
                 seen.add((field, rule))
                 evidence.append({"field": field, "rule": rule, "source": "huawei_http_report", "confidence": strength})
                 platform_claims.append(platform)
+                if rule == "android_dhcp" and field == "device_types":
+                    android_dhcp_reported = True
         if "msft 5.0" in value and (field, "dhcp_msft_signature") not in seen:
             seen.add((field, "dhcp_msft_signature"))
             evidence.append({"field": field, "rule": "dhcp_msft_signature", "source": "huawei_http_report", "confidence": "low"})
@@ -121,6 +130,20 @@ def classify_client(client, *, identity=None):
     # Public OUI is only the assignee of the interface address block.
     if identity.get("oui_vendor") is not None and identity.get("mac_type") == "global":
         evidence.append({"field": "mac", "rule": "ieee_block_assignee", "source": "ieee_public_assignment", "confidence": "low"})
+
+    # Predator is a hardware family spanning laptops and desktops. The
+    # hostname alone does not determine the form factor; require an explicitly
+    # reported Microsoft DHCP signature OR a vendor-qualified product name.
+    # The DHCP string by itself is never evidence of Windows or even a PC.
+    predator = any(re.search(r"(?:^|[-_ ])predator(?:$|[-_ ])", name)
+                   for name in normalized_names)
+    vendor_qualified = any(re.search(r"(?:^|[-_ ])acer[-_ ]predator(?:$|[-_ ])", name)
+                           for name in normalized_names)
+    if predator and (msft_dhcp_reported or vendor_qualified):
+        claims.append(("computer", "strong", "names"))
+        evidence.append({"field": "names/device_types",
+                         "rule": "predator_computer_family_with_context",
+                         "source": "huawei_http_report", "confidence": "medium"})
 
     categories = set(category for category, _, _ in claims)
     platforms = set(platform_claims)
@@ -148,6 +171,14 @@ def classify_client(client, *, identity=None):
 
     platform = next(iter(platforms)) if len(platforms) == 1 else "unknown"
     if platform not in PLATFORMS: platform = "unknown"
+
+    # Android DHCP is genuine platform evidence, but Android powers phones,
+    # tablets, TVs and embedded boxes. Use an intentionally broad category
+    # only when there is no specific device-category evidence or conflict.
+    if (category == "unknown" and not claims and not conflicts
+            and platform == "android" and android_dhcp_reported):
+        category = "android_device"
+        confidence = "low"
 
     return {
         "category": category,
