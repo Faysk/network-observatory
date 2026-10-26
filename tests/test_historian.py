@@ -90,3 +90,21 @@ class CounterPreviewTests(unittest.TestCase):
         self.assertNotEqual(points[0]['counter_epochs']['wan_rx_bytes'],points[1]['counter_epochs']['wan_rx_bytes'])
         self.assertEqual(points[0]['counter_epochs']['wan_tx_bytes'],points[1]['counter_epochs']['wan_tx_bytes'])
         self.assertNotIn('values',points[1]);self.assertLessEqual(len(points),361)
+
+
+class ObservedIncrementTests(unittest.TestCase):
+    def test_sum_before_decimation_excludes_resets_gaps_and_missing(self):
+        from app.historian import CounterPreview
+        start=datetime(2026,1,1,tzinfo=timezone.utc)
+        preview=CounterPreview(start,start+timedelta(days=1))
+        for seconds,rx in [(0,100),(60,120),(120,5),(180,15),(500,200),(560,None),(620,300),(680,320)]:
+            preview.add((start+timedelta(seconds=seconds)).isoformat(),{'wan_rx_bytes':rx,'wan_tx_bytes':rx})
+        points,period=preview.result();stat=period['observed_increments']['wan_rx_bytes']
+        self.assertEqual(stat,{'bytes':50,'valid_pairs':3,'excluded_transitions':4})
+        self.assertEqual(points[-1]['wan_rx_observed_bytes'],50)
+        self.assertEqual(points[-1]['wan_rx_bytes'],320)
+    def test_no_pair_is_unavailable_not_zero(self):
+        from app.historian import CounterPreview
+        start=datetime(2026,1,1,tzinfo=timezone.utc);p=CounterPreview(start,start+timedelta(hours=1))
+        p.add(start.isoformat(),{'wan_rx_bytes':100})
+        self.assertIsNone(p.result()[1]['observed_increments']['wan_rx_bytes']['bytes'])

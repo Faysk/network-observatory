@@ -33,3 +33,7 @@ Detalhes de Router/dispositivo exibem estrutura de gráfico, métricas, leituras
 ## Ethernet negotiated speed
 
 The inventory column joins an online device to exactly one explicit LAN port and displays its current negotiated speed from the existing status resource. Both readings must be fresh (180 seconds). Ambiguous, stale, offline, down or unreported links show unavailable. Duplicate representations of the same port are deduplicated. No new polling is added. The value describes the router port, including an upstream switch link; it does not certify the end-device cable or Internet throughput. 10/100 Mb/s can be a normal device limit or a cable/configuration limitation, not a diagnosis.
+
+## WAN observed increments
+
+The detail chart defaults to the sum of non-negative differences between consecutive valid raw counter observations no more than 180 seconds apart. Computation precedes preview decimation. Negative transitions, missing readings, duplicate/out-of-order timestamps and gaps are excluded, never repaired with an assumed modulus. No valid pair means unavailable, not zero. Totals can be incomplete and are not certified consumption or throughput; per-direction valid/excluded counts are shown. Raw counters remain selectable and unchanged in archives. CSV exposes original selected counter values and derived observed-increment totals with explicit aggregation metadata.

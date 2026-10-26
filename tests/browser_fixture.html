@@ -63,6 +63,16 @@
   assert(d.getElementById('sheetLayer').hidden,'Escape did not close sheet');
   assert(d.activeElement===trigger,'focus did not return after closing sheet');
   notes.push('escape and focus return');
+  d.querySelector('[data-detail="traffic"]').click();
+  await wait(()=>d.getElementById('historyChart').dataset.phase==='ready','WAN detail ready');
+  assert(d.getElementById('chartTitle').textContent==='Incrementos WAN observados','WAN default must be observed increments');
+  assert(d.getElementById('detailStats').textContent.includes('Transições excluídas'),'WAN exclusions hidden');
+  assert(d.getElementById('detailDesc').textContent.includes('Não é consumo total'),'Incomplete sum must be explicit');
+  d.querySelector('[data-counter-mode="raw"]').click();
+  assert(d.getElementById('chartTitle').textContent==='Contadores WAN','Raw counters toggle missing');
+  d.querySelector('[data-counter-mode="observed"]').click();
+  assert(d.getElementById('chartTitle').textContent==='Incrementos WAN observados','Observed mode not restored');
+  notes.push('WAN observed increments and raw toggle');
   out.dataset.status='pass';out.textContent=notes.join(' | ');
  }catch(e){out.dataset.status='fail';out.textContent=String(e.message||e);console.error(e);}
 })();
