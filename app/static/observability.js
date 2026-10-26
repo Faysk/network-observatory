@@ -311,7 +311,7 @@ function renderSources(data){
  const all=VM.sections(data.sources);
  for(const section of all){
    const sectionBox=node('section',undefined,'observation-section');
-   sectionBox.id='diagnostic-'+section.id;
+   sectionBox.id='diagnostic-'+section.id;sectionBox.dataset.section=section.id;
    const header=node('div',undefined,'observation-section-head');
    const heading=node('div');
    heading.append(node('h3',section.title),node('p',section.description));
@@ -366,7 +366,7 @@ function applyFilters(){
    for(const card of section.querySelectorAll('.observation-source')){
      const source=payload.sources.find(s=>s.id===card.dataset.source);
      const text=[source?.title,source?.id,VM.header(source||{}).description].join(' ').toLocaleLowerCase();
-     const match=(group.value==='all'||group.value===section.id)&&(!query||text.includes(query))&&
+     const match=(group.value==='all'||group.value===section.dataset.section)&&(!query||text.includes(query))&&
        (quickMode==='all'||quickMode==='changed'&&changed.has(source?.id)||
         quickMode==='missing'&&source?.quality!=='ok');
      card.hidden=!match;if(match){visible++;count++;}
