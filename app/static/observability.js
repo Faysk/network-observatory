@@ -16,6 +16,22 @@ const refresh=node('button','Atualizar painel'),download=node('button','Exportar
 const notice=node('p','','observation-notice');notice.setAttribute('role','status');panel.append(notice);
 const summaryGrid=node('div',undefined,'observation-overview');panel.append(summaryGrid);
 const viewNote=node('p','Selecione uma fonte para inspecionar os dados. Os indicadores mostram valores reportados; não classificam automaticamente a segurança da rede.','observation-reading-note');panel.append(viewNote);
+const operationsBox=node('section',undefined,'observation-operations');
+operationsBox.setAttribute('aria-labelledby','operationsTitle');
+const operationsHeader=node('div',undefined,'observation-operations-header');
+const operationsHeading=node('div');const operationsTitle=node('h3','Saúde e alertas do Observatory');
+operationsTitle.id='operationsTitle';
+operationsHeading.append(operationsTitle,node('p','Diagnóstico passivo do servidor, armazenamento e recolha. Alertas configurados localmente; nenhum envio externo.'));
+const operationsStatus=node('span','A consultar…','observation-badge');operationsStatus.setAttribute('role','status');
+operationsHeader.append(operationsHeading,operationsStatus);
+const operationsMetrics=node('div',undefined,'observation-operations-metrics');
+const operationsAlerts=node('div',undefined,'observation-operations-alerts');
+const operationsTrend=node('details',undefined,'observation-operations-trend');
+operationsTrend.append(node('summary','Explorar histórico real de RAM, disco e desempenho'));
+const operationsTrendBody=node('div',undefined,'observation-operations-trend-body');
+operationsTrend.append(operationsTrendBody);
+operationsBox.append(operationsHeader,operationsMetrics,operationsAlerts,operationsTrend);
+panel.append(operationsBox);
 const categoryNav=node('nav',undefined,'observation-category-nav');
 categoryNav.setAttribute('aria-label','Explorar áreas de diagnóstico');
 panel.append(categoryNav);
@@ -149,6 +165,86 @@ function recordPreview(source){
  if(rows.length>6)view.append(node('small','Mais '+(rows.length-6)+' registos na tabela técnica.'));
  return view;
 }
+function detailedConfiguration(source){
+ const rows=Array.isArray(source.data)?source.data:[];
+ const area=node('div',undefined,'observation-specialized');
+ const grouped=new Set();
+ const booleanFields=['enabled','hidden','auto_channel','wps_enabled','pmf','wmm','beamforming','mlo_enabled','airtime_fairness',
+  'nat_enabled','wan_enabled','ipv4_enabled','ipv6_enabled','dns_override_present','safe_remove_reported',
+  'managed','other_config','service_enabled','share_all','mu_mimo_enabled','supports_11r','supports_11v','supports_11w'];
+ const boolRows=[];
+ for(let index=0;index<Math.min(6,rows.length);index++){
+  const entry=rows[index];
+  if(!entry||typeof entry!=='object')continue;
+  const name=entry.interface||entry.kind||entry.band||entry.slot||'Registo '+(index+1);
+  for(const field of booleanFields){
+   if(typeof entry[field]!=='boolean')continue;
+   const key=String(name)+' '+field;
+   if(grouped.has(key))continue;grouped.add(key);
+   boolRows.push({name,field,value:entry[field]});
+  }
+ }
+ if(boolRows.length){
+  const section=node('div',undefined,'observation-boolean-panel');
+  section.append(node('div','Estados de configuração reportados · não representam uma avaliação de segurança','observation-insight-heading'));
+  const grid=node('div',undefined,'observation-boolean-grid');
+  for(const v of boolRows.slice(0,16)){
+    const tile=node('div',undefined,'observation-boolean-tile');
+    tile.append(node('small',(labels[v.field]||v.field)+' · '+v.name));
+    const flag=node('strong',v.value?'Ativado':'Desativado','observation-boolean-value');
+    flag.dataset.value=String(v.value);
+    tile.append(flag);grid.append(tile);
+  }
+  section.append(grid);
+  if(boolRows.length>16)section.append(node('small',boolRows.length-16+' estados adicionais na tabela técnica.'));
+  area.append(section);
+ }
+ if(source.id==='dhcp'||source.id==='client_details'){
+  const key=source.id==='dhcp'?'lease_remaining_seconds':'lease_remaining_seconds';
+  const values=rows.map(row=>row?.[key]).filter(v=>Number.isFinite(v)&&v>=0);
+  if(values.length){
+   const box=node('div',undefined,'observation-lease-panel');
+   const min=Math.min(...values),max=Math.max(...values),avg=values.reduce((a,b)=>a+b,0)/values.length;
+   box.append(node('strong','Concessões DHCP reportadas','observation-insight-heading'),
+    node('p','Tempo restante das concessões, não tempo online dos dispositivos.','observation-provenance'));
+   const stats=node('div',undefined,'observation-inline-stats');
+   for(const [title,val] of [['Menor',min],['Média',avg],['Maior',max]])
+     stats.append(metric(title,(val/60).toFixed(1)+' min','Valor reportado'));
+   box.append(stats);area.append(box);
+  }
+ }
+ if(source.id==='radio_settings' || source.id==='radios'){
+  const radio=node('div',undefined,'observation-radio-layout');
+  radio.append(node('strong','Interfaces e canais disponíveis','observation-insight-heading'));
+  const cells=node('div',undefined,'observation-radio-grid');
+  for(const item of rows.slice(0,10)){
+   const iface=node('div',undefined,'observation-radio-card');
+   iface.append(node('strong',item.interface||item.band||'Rádio reportado'));
+   const bits=[
+     item.band||null,
+     Number.isFinite(item.channel_reported)?'Canal '+item.channel_reported:null,
+     Number.isFinite(item.power_pct)?'Potência configurada '+item.power_pct+'%':null,
+     item.enabled===true?'Ativado':item.enabled===false?'Desativado':null
+   ].filter(Boolean);
+   iface.append(node('small',bits.join(' · ')||'Sem metadados adicionais'));
+   cells.append(iface);
+  }
+  radio.append(cells,node('small','WLAN pode identificar interface virtual, não cadeia MIMO nem antena física.'));area.append(radio);
+ }
+ if(source.id==='upnp'&&rows.length){
+  const flow=node('div',undefined,'observation-upnp-list');flow.append(node('strong','Encaminhamentos de portas observados','observation-insight-heading'));
+  for(const item of rows.slice(0,6)){
+   const line=node('div',undefined,'observation-upnp-row');
+   const left=node('span',(item.protocol||'Protocolo desconhecido')+' / '+(item.external_port??'—'));
+   const arrow=node('span','→','observation-upnp-arrow');
+   const right=node('span',(item.client_ip||'Destino desconhecido')+':'+(item.internal_port??'—'));
+   line.append(left,arrow,right);flow.append(line);
+  }
+  flow.append(node('small','Mapeamento configurado: não comprova exposição externa nem sessão ativa.'));
+  area.append(flow);
+ }
+ return area.childNodes.length?area:null;
+}
 function sourceOverview(source){
  const h=VM.header(source),n=VM.highlights(source);
  const result=node('div',undefined,'observation-quick');
@@ -194,6 +290,7 @@ function sourceOverview(source){
      result.append(gauge);
    }
  }
+ const special=detailedConfiguration(source);if(special)result.append(special);
  const preview=recordPreview(source);if(preview)result.append(preview);
  return result;
 }
@@ -458,6 +555,60 @@ function renderChanges(data){
  }
  if(data.changes_truncated)changes.append(node('p','A prévia mostra até 500 alterações. Use um período menor; os registos originais permanecem no arquivo.'));
 }
+let operationsLoaded=false;
+function renderOperations(result){
+ operationsLoaded=true;operationsMetrics.replaceChildren();operationsAlerts.replaceChildren();
+ operationsTrendBody.replaceChildren();
+ const h=result.health||{},active=Array.isArray(result.alerts)?result.alerts:[];
+ operationsStatus.textContent=active.some(x=>x.severity==='critical')?'Estado crítico':
+   active.some(x=>x.severity==='warning')?'Requer atenção':
+   result.rules?.enabled===false?'Regras desativadas':
+   h.hostSampleAgeMinutes==null?'Telemetria incompleta':'Sem alertas ativos';
+ operationsStatus.className='observation-badge '+(active.some(x=>x.severity==='critical')?'missing':active.some(x=>x.severity==='warning')?'aged':'present');
+ function num(v,unit,digits=1){return typeof v==='number'&&Number.isFinite(v)?v.toFixed(digits)+(unit?' '+unit:''):'Sem medição';}
+ const tiles=[
+  ['RAM do processo',num(h.processRssMB,'MB'),'Da última leitura válida do S7'],
+  ['Volume do arquivo',num(h.volumeFreeGiB,'GiB'),'Espaço livre na unidade configurada'],
+  ['SQLite + WAL',num(h.databaseMB,'MB')+' / '+num(h.walMB,'MB'),'Tamanho dos ficheiros, não espaço reservado'],
+  ['API p95',num(h.apiP95Ms,'ms'),'Amostra das últimas 128 requisições'],
+  ['Coletor Huawei',h.collectorState||'Desconhecido','Sucesso há '+num(h.collectorSuccessAgeMinutes,'min')],
+  ['Crescimento SQLite',num(h.growthMBPerDay,'MB/dia'),'Só calculado após ≥6 horas de leituras']
+ ];
+ for(const [title,value,note] of tiles)operationsMetrics.append(metric(title,value,note));
+ if(result.rulesSource==='invalid_file_disabled')
+   operationsAlerts.append(node('p','Configuração local de alertas inválida: regras desativadas até correção.','observation-operations-warning'));
+ if(!active.length)operationsAlerts.append(node('p',result.rules?.enabled===false?'Alertas desativados na configuração local.':
+    'Nenhuma condição das regras configuradas foi detetada nas leituras disponíveis. Isso não comprova ausência de problemas.','observation-operations-empty'));
+ for(const entry of active.slice(0,20)){
+   const line=node('div',undefined,'observation-alert-row');line.dataset.severity=entry.severity||'info';
+   const label=entry.severity==='critical'?'Crítico':entry.severity==='warning'?'Atenção':'Informativo';
+   const textBox=node('div');textBox.append(node('strong',entry.title||'Observação'),node('small',entry.detail||''));
+   line.append(badge(label,entry.severity==='critical'?'missing':entry.severity==='warning'?'aged':'neutral'),textBox);
+   operationsAlerts.append(line);
+ }
+ const footer=node('div',undefined,'observation-operations-footer');
+ footer.append(node('small','Regras: '+(result.rulesSource==='local_file'?'configuração local':result.rulesSource==='defaults'?'valores padrão':result.rulesSource||'não identificada')+
+  ' · Apenas alertas passivos nesta página. Não são enviados e-mails ou notificações externas.'));
+ operationsAlerts.append(footer);
+ const historical=result.history||{};
+ if(Array.isArray(historical.points)&&historical.points.length){
+   const expanded=trendPanel({title:'Saúde do Observatory',points:historical.points,
+     metrics:historical.metrics||[],cadence_seconds:60,truncated:historical.truncated});
+   operationsTrendBody.append(expanded);
+ }else operationsTrendBody.append(node('p','Sem histórico do host disponível. A recolha no S7 pode ainda não estar ativa.'));
+}
+async function loadOperations(){
+ try{
+  const result=await get('/api/router/operations');
+  renderOperations(result);
+ }catch{
+  if(!operationsLoaded){
+    operationsStatus.textContent='Telemetria indisponível';
+    operationsStatus.className='observation-badge aged';
+    operationsAlerts.replaceChildren(node('p','Não foi possível consultar a saúde do Observatory. Os indicadores não devem ser interpretados como normais.'));
+  }
+ }
+}
 function render(data){
  renderSummary(data);
  renderSources(data);
@@ -465,6 +616,6 @@ function render(data){
  unsupported.replaceChildren(...Object.values(data.unsupported||{}).map(v=>node('li',v)));
  notice.textContent=data.sources.filter(s=>s.quality==='ok').length+'/'+data.sources.length+' fontes atuais · consulta '+time(new Date().toISOString())+'.';
 }
-async function load(){if(busy){pendingReload=true;return;}busy=true;refresh.disabled=true;notice.textContent='A consultar leituras guardadas…';try{payload=await get(`/api/router/observability?hours=${period.value}`);render(payload);}catch{notice.textContent='API indisponível. Os valores apresentados pertencem à última consulta bem-sucedida.';}finally{busy=false;refresh.disabled=false;if(pendingReload){pendingReload=false;load();}}}
-refresh.addEventListener('click',load);period.addEventListener('change',load);download.addEventListener('click',()=>{if(!payload)return;const url=URL.createObjectURL(new Blob([JSON.stringify(payload,null,2)],{type:'application/json'})),a=node('a');a.href=url;a.download='router-observations-private.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});load();setInterval(()=>{if(!document.hidden&&!panel.contains(document.activeElement))load();},60000);
+async function load(){if(busy){pendingReload=true;return;}busy=true;refresh.disabled=true;notice.textContent='A consultar leituras guardadas…';try{payload=await get(`/api/router/observability?hours=${period.value}`);render(payload);loadOperations();}catch{notice.textContent='API indisponível. Os valores apresentados pertencem à última consulta bem-sucedida.';}finally{busy=false;refresh.disabled=false;if(pendingReload){pendingReload=false;load();}}}
+refresh.addEventListener('click',()=>{load();loadOperations();});period.addEventListener('change',load);download.addEventListener('click',()=>{if(!payload)return;const url=URL.createObjectURL(new Blob([JSON.stringify(payload,null,2)],{type:'application/json'})),a=node('a');a.href=url;a.download='router-observations-private.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});load();setInterval(()=>{if(!document.hidden&&!panel.contains(document.activeElement))load();},60000);
 })();
