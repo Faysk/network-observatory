@@ -158,6 +158,15 @@ class HttpTests(unittest.TestCase):
             with self.assertRaises(urllib.error.HTTPError) as error:self.request(path)
             self.assertEqual(error.exception.code,400)
 
+    def test_read_only_operations_endpoint(self):
+        result=json.loads(self.request('/api/router/operations')[1])
+        self.assertIn('health',result)
+        self.assertIn('alerts',result)
+        self.assertIn('history',result)
+        self.assertIn('rulesSource',result)
+        self.assertNotIn('DB_PATH',json.dumps(result))
+        self.assertNotIn('password',json.dumps(result).lower())
+
     def test_observability_trend_endpoint_and_invalid_queries(self):
         result=json.loads(self.request('/api/router/observability/trend?source=station_details&hours=24')[1])
         recent=json.loads(self.request('/api/router/observability/archive/recent?source=upnp&limit=10')[1])
