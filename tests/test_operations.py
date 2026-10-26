@@ -56,7 +56,7 @@ class OperationsTests(unittest.TestCase):
         self.assertEqual(response['health']['processRssMB'],40)
         self.assertIsNone(response['health']['growthMBPerDay'])
         self.assertEqual(response['health']['volumeFreeGiB'],10)
-        self.assertEqual(response['rulesSource'],'injected' if False else 'defaults')
+        self.assertEqual(response['rulesSource'],'defaults')
 
         core.COLLECTOR_STATE.update(state='auth_blocked',last_success=(self.now-timedelta(minutes=33)).isoformat())
         with patch('app.operations.sizes_and_storage',return_value=self.values(.8)):
