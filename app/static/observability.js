@@ -11,7 +11,8 @@ const toolbar=node('div',undefined,'observation-toolbar'),period=node('select');
 for(const [value,label] of [[24,'Últimas 24 horas'],[168,'Últimos 7 dias'],[720,'Últimos 30 dias'],[8784,'Últimos 366 dias']]){const o=node('option',label);o.value=value;period.append(o);}
 const group=node('select');group.setAttribute('aria-label','Grupo de fontes');
 for(const [value,label] of [['all','Todas as fontes'],['wifi','Wi-Fi'],['clients','Clientes e DHCP'],['network','LAN, WAN e IPv6'],['policies','Políticas e UPnP'],['services','Hardware e serviços']]){const option=node('option',label);option.value=value;group.append(option);}
-const refresh=node('button','Atualizar painel'),download=node('button','Exportar resumo JSON');refresh.type=download.type='button';toolbar.append(group,period,refresh,download);panel.append(toolbar);
+const search=node('input',undefined,'observation-source-search');search.type='search';search.placeholder='Pesquisar fonte ou diagnóstico…';search.setAttribute('aria-label','Pesquisar fontes de diagnóstico');
+const refresh=node('button','Atualizar painel'),download=node('button','Exportar resumo JSON');refresh.type=download.type='button';toolbar.append(group,period,search,refresh,download);panel.append(toolbar);
 const notice=node('p','','observation-notice');notice.setAttribute('role','status');panel.append(notice);
 const summaryGrid=node('div',undefined,'observation-overview');panel.append(summaryGrid);
 const viewNote=node('p','Selecione uma fonte para inspecionar os dados. Os indicadores mostram valores reportados; não classificam automaticamente a segurança da rede.','observation-reading-note');panel.append(viewNote);
@@ -29,6 +30,7 @@ const groups={wifi:['radio_settings','guest_limits','guest_network','wps','wifi_
 let payload=null,busy=false;
 Object.assign(labels,{conflicting_fields:'Campos divergentes entre linhas reportadas',reported_rows:'Linhas reportadas para este MAC'});
 group.addEventListener('change',()=>{if(payload)render(payload);});
+search.addEventListener('input',()=>{if(payload)renderSources(payload);});
 document.querySelector('a[href="#routerObservability"]')?.addEventListener('click',()=>{document.getElementById('sidebar')?.classList.remove('open');});
 const time=v=>v?new Date(v).toLocaleString('pt-PT'):'Sem leitura';
 async function get(url){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000);try{const r=await fetch(url,{cache:'no-store',signal:controller.signal});if(!r.ok)throw Error();return await r.json();}finally{clearTimeout(timer);}}
@@ -61,6 +63,63 @@ function readable(key,value){
  if(value===false)return 'Não';
  if(value===null||value===undefined||value==='')return 'Sem dados';
  return String(value);
+}
+function recordPreview(source){
+ const rows=Array.isArray(source.data)?source.data:[];
+ if(!rows.length)return null;
+ const chosen={
+  radio_settings:['channel_reported','power_pct','width_policy_code','standard_reported','enabled'],
+  radios:['band','enabled'],
+  station_details:['rssi_dbm','snr_db_reported','rx_link_mbps','tx_link_mbps','work_mode_reported'],
+  dhcp:['ip','interface_reported','lease_remaining_seconds','address_source_reported'],
+  client_details:['ip','port_reported','status_reported','type_reported','lease_remaining_seconds'],
+  client_addresses:['ip','port_reported','status_reported','time_reported'],
+  client_modes:['ip','work_mode_reported'],
+  upnp:['external_port','internal_port','protocol','client_ip','enabled'],
+  topology:['mode_reported','vlan_reported','l3_enabled'],
+  lan_settings:['enabled','pool_start_ip','pool_end_ip','dns_override_present'],
+  wan_nat:['services_reported','nat_enabled','ipv4_enabled','connection_type_reported'],
+  guest_limits:['upload_limit_reported','download_limit_reported'],
+  guest_network:['pool_start_ip','pool_end_ip'],
+  wifi_schedule:['start_reported','end_reported','enabled','repeat_days_code'],
+  wifi_backhaul:['airtime_fairness','backhaul_reported'],
+  usb_voice:['band','component_reported','registration_state','status_reported'],
+  file_services:['enabled','port','user_count','wan_enabled'],
+  ipv6:['kind','connection_state','dns_present','gateway_present'],
+  ipv6_lan:['enabled','managed','other_config'],
+  wps:['enabled','method_reported'],
+  band_steering:['mac'],
+  mac_policy:['filter_right','filter_policy','wlan_filter_right','wlan_filter_policy'],
+  firewall_v4:['right_code','policy_code','level_code'],
+  firewall_v6:['right_code','policy_code','level_code'],
+  wan_acl:['enabled','protocol_code','source_restricted'],
+  voice_schedule:['enabled','policy_code'],
+  wifi_features:['mlo_enabled'],
+  dlna:['enabled','share_all']
+ }[source.id]||[];
+ const titleKeys=['name','description','interface','band','kind','ip','slot','mac'];
+ const view=node('div',undefined,'observation-record-preview');
+ const heading=node('div',undefined,'observation-graphic-title');
+ heading.append(node('strong','Detalhes por registo'),node('small','Amostra atual · até 6 registos'));
+ view.append(heading);
+ const grid=node('div',undefined,'observation-record-grid');
+ for(const [i,entry] of rows.slice(0,6).entries()){
+   if(!entry||typeof entry!=='object')continue;
+   const card=node('article',undefined,'observation-record-card');
+   const titleKey=titleKeys.find(k=>entry[k]!==undefined&&entry[k]!==null&&entry[k]!=='');
+   const name=titleKey?(labels[titleKey]||titleKey)+': '+readable(titleKey,entry[titleKey]):'Registo '+(i+1);
+   card.append(node('strong',name,'observation-record-title'));
+   const fields=node('dl',undefined,'observation-record-fields');
+   const keys=[...chosen,...Object.keys(entry)].filter((k,idx,list)=>list.indexOf(k)===idx&&k!==titleKey&&entry[k]!=null&&entry[k]!=='').slice(0,5);
+   for(const key of keys){
+     fields.append(node('dt',labels[key]||key),node('dd',readable(key,entry[key])));
+   }
+   if(fields.childNodes.length)card.append(fields);
+   grid.append(card);
+ }
+ view.append(grid);
+ if(rows.length>6)view.append(node('small','Mais '+(rows.length-6)+' registos na tabela técnica.'));
+ return view;
 }
 function sourceOverview(source){
  const h=VM.header(source),n=VM.highlights(source);
@@ -107,6 +166,7 @@ function sourceOverview(source){
      result.append(gauge);
    }
  }
+ const preview=recordPreview(source);if(preview)result.append(preview);
  return result;
 }
 function technical(source){
@@ -130,7 +190,11 @@ function renderSources(data){
  const countsBySource=new Map();
  for(const c of data.changes)countsBySource.set(c.source,(countsBySource.get(c.source)||0)+1);
  const all=VM.sections(data.sources);
- const allowed=group.value==='all'?all:all.filter(section=>section.id===group.value);
+ const query=search.value.toLocaleLowerCase().trim();
+ const allowed=(group.value==='all'?all:all.filter(section=>section.id===group.value)).map(section=>({
+   ...section,sources:section.sources.filter(src=>!query||[src.title,src.id,VM.header(src).description].join(' ').toLocaleLowerCase().includes(query))
+ })).filter(section=>section.sources.length);
+ if(!allowed.length)cards.append(node('p','Nenhuma fonte corresponde à pesquisa. Experimenta outro termo.','observation-search-empty'));
  for(const section of allowed){
    const sectionBox=node('section',undefined,'observation-section');
    sectionBox.id='diagnostic-'+section.id;
