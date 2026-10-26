@@ -27,6 +27,19 @@ const send=(res,obj,code=200,delay=0)=>setTimeout(()=>{if(res.destroyed)return;l
 const server=http.createServer((req,res)=>{
  const url=new URL(req.url,'http://127.0.0.1'),pathname=url.pathname;
  if(pathname==='/api/status'){counts.status++;send(res,status,200,25);return;}
+ if(pathname==='/api/router/operations'){
+  send(res,{
+    generatedAt:new Date().toISOString(),
+    health:{processRssMB:42.6,volumeFreeGiB:14.2,databaseMB:44.4,walMB:0.2,apiP95Ms:28,
+      collectorState:'ok',collectorSuccessAgeMinutes:2,hostSampleAgeMinutes:1,growthMBPerDay:null},
+    alerts:[{id:'config_1',severity:'info',title:'Alteração observada',detail:'Regra de Wi-Fi alterada na leitura anterior.',source:'wps'}],
+    alertCount:1,rules:{enabled:true},rulesSource:'defaults',
+    history:{points:[
+      {ts:new Date(Date.now()-120000).toISOString(),status:'ok',rss_mb:42.1,database_mb:43.7,sd_free_gib:14.2,api_p95_ms:20,collector_ms:80},
+      {ts:new Date(Date.now()-60000).toISOString(),status:'ok',rss_mb:42.6,database_mb:44.4,sd_free_gib:14.2,api_p95_ms:28,collector_ms:93}],
+      truncated:false,metrics:[{key:'rss_mb',label:'RAM processo',unit:'MB'},{key:'database_mb',label:'SQLite',unit:'MB'}] }
+   },200,20);return;
+ }
  if(pathname==='/api/router/observability'){
   send(res,{sources:[{id:'radio_settings',title:'Configuração Wi-Fi',quality:'ok',attempt_status:'ok',collected_at:stamp,age_seconds:0,data:[{interface:'wlan1',width_policy_code:3,power_pct:0,description:'<img src=x onerror=alert(1)>'}]},{id:'upnp',title:'Mapeamentos UPnP',quality:'ok',attempt_status:'ok',collected_at:stamp,age_seconds:0,data:[]},{id:'ipv6',title:'Estado WAN IPv6',quality:'unavailable',attempt_status:'unavailable',reason:'transport',data:null}],changes:[{id:1,source:'upnp',previous_at:stamp,observed_at:stamp,crosses_gap:true,detail:{before_count:1,after_count:0,changed_fields:['external_port'],added:0,removed:1}}],unsupported:{wifi_logs:'Exportação indisponível na conta verificada.'},width_policies:{3:'Auto. 20/40/80 MHz'},poll_seconds:300},200,20);return;
  }
