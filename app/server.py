@@ -143,6 +143,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def get_response(self):
         path = urlsplit(self.path)
+        if path.scheme or path.netloc:
+            return self.error_json(403, 'Proxy requests are not supported')
         try:
             if path.path in ('/', '/router', '/s7', '/valt'):
                 destination = '/router/' if path.path == '/' else path.path + '/'
