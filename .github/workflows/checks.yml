@@ -20,3 +20,5 @@ jobs:
       - run: node --check app/static/app.js
       - run: node tests/browser_smoke.cjs
       - run: node --check app/static/devices.js
+      - run: node tests/test_inventory.cjs
+      - run: INVENTORY_SMOKE=1 node tests/browser_smoke.cjs

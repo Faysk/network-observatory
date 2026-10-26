@@ -31,7 +31,7 @@ O adaptador opcional `python -m app.adapters.huawei_b7 --help` foi desenvolvido 
 - HTTP: JS/CSS/SVG/woff2 de código público (até 512 KiB) usam ETag, Last-Modified e revalidação 304; gzip seletivo para JS/CSS/SVG suficientemente compressíveis. **Sem cache público, immutable ou service worker**. HTML, API, JSON, conteúdo privado e `/valt/` continuam `no-store`.
 - Home carrega status, resumo e inventário em paralelo com erros/retry por secção. O painel atualiza imediatamente período/legenda, cancela consultas obsoletas e só habilita exportação para bundle válido.
 
-**Não foi realizado deploy no S7.** Consulte [o relatório de aceite](docs/QA_ACCEPTANCE.md): benchmarks sintéticos e testes automatizados **não** substituem medições de LAN, carga do microSD, validação no Android 8 ou sincronização futura com o frontend S7 independente.
+As otimizações foram publicadas e verificadas em LAN em 25/10/2026; o inventário integrado segue a homologação descrita em `docs/RELEASE_INVENTORY.md`. Consulte [o relatório de aceite](docs/QA_ACCEPTANCE.md): benchmarks sintéticos e testes automatizados **não** substituem medições de LAN, carga do microSD, validação no Android 8 ou sincronização futura com o frontend S7 independente.
 ## Identificação MAC / OUI (issue #7)
 
 O inventário em `GET /api/router/clients` agora expõe um campo de **evidências `identity`** separado dos dados reportados pelo Huawei: endereço normalizado, tipo de MAC (global/local/multicast/etc.), fornecedor do **bloco de endereço** IEEE quando disponível, versão/fonte. O MAC local **não é prova** de randomização; OUI global **não identifica modelo nem aparelho físico**. Nenhuma amostra histórica ou exportação é modificada.
@@ -73,3 +73,5 @@ GET não tem autenticação; o padrão é loopback. Não exponha este servidor n
 O repositório contém código e fixtures sintéticas. Bancos, inventário real, registros, credenciais, capturas e backups foram excluídos. Null representa dado desconhecido; bytes acumulados não equivalem a velocidade nem consumo de uma janela. Sensores brutos não recebem unidades presumidas. Para Android/S7, preserve pelo menos 2 GiB disponíveis no interno; dados persistentes devem ficar no SD. A política não é uma quota automática.
 
 Licença MIT conforme `LICENSE`.
+
+Personalização e associações explícitas: [CLI administrativa local](docs/DEVICE_PREFERENCES.md).

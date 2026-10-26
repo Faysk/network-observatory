@@ -29,6 +29,7 @@ def main():
         return
     with sqlite3.connect(dbpath,timeout=10) as db:
         db.row_factory=sqlite3.Row
+        db.execute('BEGIN IMMEDIATE')
         # Existing schema must be migrated by the application in core.init_db()
         if not db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='device_presentation_overrides'").fetchone():
             p.error('Presentation table not initialized. Start the upgraded server safely first.')

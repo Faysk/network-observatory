@@ -3,7 +3,7 @@
 No HTTP write endpoint. All mutations require local shell/CLI access to DB volume.
 """
 from datetime import datetime,timezone
-from .device_identity import normalize_mac
+from .device_identity import normalize_mac, mac_address_type
 from .device_classifier import CATEGORIES
 
 ICONS=CATEGORIES
@@ -11,7 +11,7 @@ SELECT_FIELDS='nickname,category,icon,revision'
 
 def check_mac(mac):
     normalized=normalize_mac(mac)
-    if not normalized or normalized in ('00:00:00:00:00:00','ff:ff:ff:ff:ff:ff'):
+    if not normalized or mac_address_type(normalized) not in ('global','locally_administered'):
         raise ValueError('Invalid EUI-48')
     return normalized
 

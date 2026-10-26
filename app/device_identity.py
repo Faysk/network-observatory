@@ -129,7 +129,7 @@ def get_registry(directory):
     try:
         stat = filename.stat()
         key = (str(filename), stat.st_mtime_ns, stat.st_size)
-    except FileNotFoundError:
+    except OSError:
         key = (str(filename), None, None)
     with _registry_lock:
         if _registry_cache_key == key and _registry_cache is not None:

@@ -5,6 +5,8 @@ const {spawn}=require('node:child_process'),assert=require('node:assert/strict')
 const root=path.resolve(__dirname,'..'),staticRoot=path.join(root,'app/static');
 const chrome=process.env.CHROME_PATH||['/usr/bin/google-chrome','/usr/bin/chromium','/usr/bin/chromium-browser'].find(fs.existsSync);
 if(!chrome)throw Error('Chromium/Chrome required for browser integration');
+const inventorySmoke=process.env.INVENTORY_SMOKE==='1';
+const fixtureClients=()=>Array.from({length:1000},(_,i)=>({mac:'02:00:00:'+i.toString(16).padStart(6,'0').match(/../g).join(':'),names:['Fixture '+i],ips:['192.0.2.1'],ports:['LAN1'],quality:'ok',reported_status:'Online',classification:{category:'smartphone',confidence:'low'},identity:{mac_type:'locally_administered'},presentation:i===0?{source:'manual',nickname:'<script>Example</script>',category:'tablet',icon:'camera'}:{source:'none'}}));
 const stamp=new Date().toISOString(),now=Date.now();
 const full=(period)=>({
  period:{key:period,from:new Date(now-86400000).toISOString(),to:stamp,resolution_seconds:600},
@@ -23,7 +25,7 @@ const send=(res,obj,code=200,delay=0)=>setTimeout(()=>{if(res.destroyed)return;l
 const server=http.createServer((req,res)=>{
  const url=new URL(req.url,'http://127.0.0.1'),pathname=url.pathname;
  if(pathname==='/api/status'){counts.status++;send(res,status,200,25);return;}
- if(pathname==='/api/router/clients'){counts.inventory++;send(res,{clients:[]},200,80);return;}
+ if(pathname==='/api/router/clients'){counts.inventory++;send(res,{clients:inventorySmoke?fixtureClients():[]},200,80);return;}
  if(pathname==='/api/v1/overview'){
   const period=url.searchParams.get('period')||'24h';
   if(url.searchParams.get('view')==='summary'){
@@ -37,7 +39,7 @@ const server=http.createServer((req,res)=>{
   return;
  }
  let local;
- if(pathname==='/tests/browser_fixture.html')local=path.join(root,'tests/browser_fixture.html');
+ if(['/tests/browser_fixture.html','/tests/inventory_browser.html'].includes(pathname))local=path.join(root,'tests',path.basename(pathname));
  else if(pathname==='/router/'||pathname==='/router')local=path.join(staticRoot,'index.html');
  else if(pathname.startsWith('/router/'))local=path.join(staticRoot,decodeURIComponent(pathname.slice('/router/'.length)));
  else local=path.join(staticRoot,decodeURIComponent(pathname.slice(1)));
@@ -48,7 +50,7 @@ const server=http.createServer((req,res)=>{
 });
 server.listen(0,'127.0.0.1',async()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'network-observatory-browser-'));
- const target='http://127.0.0.1:'+server.address().port+'/tests/browser_fixture.html';
+ const target='http://127.0.0.1:'+server.address().port+(inventorySmoke?'/tests/inventory_browser.html':'/tests/browser_fixture.html');
  const args=['--headless=new','--no-sandbox','--disable-gpu','--disable-dev-shm-usage','--no-first-run',
   '--user-data-dir='+dir,'--virtual-time-budget=24000','--dump-dom',target];
  const proc=spawn(chrome,args);let stdout='',stderr='';
@@ -56,12 +58,12 @@ server.listen(0,'127.0.0.1',async()=>{
  const kill=setTimeout(()=>proc.kill('SIGKILL'),45000);
  try{
   const code=await new Promise((resolve,reject)=>{proc.on('error',reject);proc.on('close',resolve);});
-  const match=stdout.match(/<div id="smoke" data-status="([^"]+)">([^<]*)<\/div>/);
+  const match=stdout.match(/<div id="(?:smoke|result)" data-status="([^"]+)">([^<]*)<\/div>/);
   console.log('Network browser',match?.[1],match?.[2],'requests',counts);
   assert.equal(code,0,'Chromium did not exit cleanly: '+stderr.slice(-300));
   assert.equal(match?.[1],'pass',match?.[2]||'Browser integration failed');
-  assert.equal(counts.summary,2,'Summary should retry once, never reload whole page');
-  assert.equal(counts.full['1y'],2,'Retry and cached repeat must make only two year requests');
+  if(!inventorySmoke)assert.equal(counts.summary,2,'Summary should retry once, never reload whole page');
+  if(!inventorySmoke)assert.equal(counts.full['1y'],2,'Retry and cached repeat must make only two year requests');
  }catch(e){console.error(e);process.exitCode=1;}
  finally{clearTimeout(kill);server.close();fs.rmSync(dir,{recursive:true,force:true});}
 });

@@ -1,4 +1,4 @@
-# Personalização local de identidades — issue #11 (implementação parcial)
+# Personalização local de identidades — issue #11 — administração local
 
 ## Segurança antes de UX de edição
 
@@ -26,3 +26,12 @@ O MAC acima é **fictício**. O CLI rejeita categorias/ícones fora da lista, te
 - [ ] Autenticação administrativa web independente e proteção CSRF revisada; escolha segura do mecanismo antes de criar qualquer ação web de escrita.
 - [ ] Formulário acessível de edição, confirmação e cancelamento, sem falso botão quando não autorizado.
 - [ ] Homologação de migração, backup, volume microSD e orçamento do interno >=2 GiB no S7 físico.
+
+
+## Associações reversíveis — issue #12
+
+`python tools/device_groups.py associate MAC_A MAC_B --db /volume/sd/observatory.db` associa explicitamente 2–32 identidades já observadas; `dissociate MAC_A` remove a associação e dissolve um grupo que ficaria com um único membro. `list` mostra os vínculos. Execute somente em sessão local/SSH autenticada, com backup consistente; o CLI serializa transações com BEGIN IMMEDIATE. Nunca colocar identificadores reais em issues ou exemplos públicos.
+
+A API de leitura distingue `association` manual de `possible_relations` (no máximo três sugestões de baixa confiança por identidade, baseadas em mesmo nome reportado e conflitos explícitos). Nome igual não confirma o mesmo aparelho. Contagens e exportação continuam por MAC. Não há união de históricos nem mudança de amostras, timestamps ou consumo. Grupos manuais não são criados no deploy.
+
+A edição web é uma evolução separada: esta entrega usa a alternativa CLI prevista na issue, sem sessão administrativa fictícia nem endpoint de escrita aberto. Campos personalizados são escapados na interface; notas permanecem privadas. Os valores inferidos originais continuam consultáveis em `classification`.

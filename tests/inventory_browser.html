@@ -1,0 +1,22 @@
+<!doctype html><html lang="pt"><meta charset="utf-8"><title>Inventário sintético — QA</title>
+<div id="result" data-status="pending">A testar…</div><iframe id="frame" src="/router/" style="width:1300px;height:900px;border:0"></iframe>
+<script>
+(async()=>{const out=document.querySelector('#result'),f=document.querySelector('#frame');const notes=[];
+const sleep=n=>new Promise(r=>setTimeout(r,n));const wait=async(fn,label)=>{for(let i=0;i<300;i++){if(fn())return;await sleep(25);}throw Error(label)};
+const ok=(v,s)=>{if(!v)throw Error(s)};
+try{await wait(()=>f.contentWindow.FNO?.state?.resources?.inventory?.phase==='ready','inventory');
+const w=f.contentWindow,d=f.contentDocument;d.querySelector('#deviceOpenAll').focus();d.querySelector('#deviceOpenAll').click();await wait(()=>d.querySelector('#deviceExplorerSearch'),'explorer');
+ok(d.querySelectorAll('#deviceExplorerResults [data-open-device]').length<=40,'DOM unbounded');
+ok(d.querySelector('#deviceExplorerTotal').textContent.includes('1000'),'count');notes.push('1000 identities / 40 DOM cards');
+const input=d.querySelector('#deviceExplorerSearch');input.focus();input.value='Fixture 99';input.dispatchEvent(new w.Event('input',{bubbles:true}));
+ok(d.activeElement===input,'search focus lost');ok(d.querySelector('#deviceExplorerMessage').textContent.includes('11 identidades'),'search count');
+const first=d.querySelector('#deviceExplorerResults [data-open-device]');first.focus();
+w.FNO.state.clients[990].names=['Fixture 990 updated'];d.dispatchEvent(new w.CustomEvent('fno:update'));ok(d.activeElement.dataset.openDevice===first.dataset.openDevice,'card focus lost');notes.push('filter/search/poll focus retained');
+input.value='';input.dispatchEvent(new w.Event('input',{bubbles:true}));
+const more=d.querySelector('[data-inv-more]');more.focus();more.click();ok(d.querySelectorAll('#deviceExplorerResults [data-open-device]').length===80,'pagination');ok(d.activeElement.matches('[data-inv-more]'),'pagination focus');notes.push('load more 80');
+const filter=d.querySelector('#deviceExplorerCategory');filter.value='tablet';filter.dispatchEvent(new w.Event('change',{bubbles:true}));ok(d.querySelector('#deviceExplorerResults').textContent.includes('Personalizado'),'manual category missing');ok(!d.querySelector('#deviceExplorerResults script'),'unsafe markup');notes.push('manual precedence and escaped labels');
+for(const width of [320,768,1300]){f.style.width=width+'px';await sleep(100);ok(d.documentElement.scrollWidth<=width+2,'horizontal overflow '+width);}
+notes.push('320/768/1300 no page overflow');
+d.querySelector('#deviceClose').click();ok(d.activeElement.id==='deviceOpenAll','return focus');ok(!d.querySelector('.shell').inert,'shell remained inert');notes.push('dialog close restores focus');
+out.dataset.status='pass';out.textContent=notes.join(' | ');
+}catch(e){out.dataset.status='fail';out.textContent=e.stack||String(e)}})();</script></html>
