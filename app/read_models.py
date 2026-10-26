@@ -193,6 +193,38 @@ def overview_rows(db, start, end):
         yield row['ts'], payload if row['compact'] else overview_point(payload)
 
 
+def refresh_wifi_context(db, batch=64, cursors=None):
+    """Rebuild only old compact rows lacking Wi-Fi keys; never edit raw archive.
+
+    Called explicitly by the offline read-model builder, not by a live GET.
+    """
+    init_router(db)
+    cursors = cursors if cursors is not None else {}
+    total = 0
+    for table, raw, prefix in (('router_chart_points', 'huawei_samples', 'wifi_overview'),
+                               ('client_chart_points', 'router_client_samples', 'wifi_client')):
+        after = cursors.get(prefix, 0)
+        marker = '$.rssi_24_dbm' if prefix == 'wifi_overview' else '$.wifi_links'
+        rows = db.execute(
+            f"SELECT r.* FROM {table} p JOIN {raw} r ON r.id=p.id "
+            "WHERE p.id>? AND json_type(p.payload,?) IS NULL ORDER BY p.id LIMIT ?",
+            (after, marker, batch)).fetchall()
+        parent_wifi = {}
+        for row in rows:
+            payload = json.loads(row['payload'])
+            if prefix == 'wifi_overview':
+                project_overview(db, row['id'], row['ts'], payload)
+            else:
+                if row['sample_id'] not in parent_wifi:
+                    parent = db.execute('SELECT payload FROM huawei_samples WHERE id=?', (row['sample_id'],)).fetchone()
+                    parent_wifi[row['sample_id']] = json.loads(parent['payload']).get('wifi', {}) if parent else {}
+                project_client(db, row['id'], row['ts'], row['mac'], payload, parent_wifi[row['sample_id']])
+        total += len(rows)
+        if rows:
+            cursors[prefix] = rows[-1]['id']
+    return total
+
+
 def backfill_router(db, batch=64, cursors=None):
     """One bounded transaction, resumable, idempotent, including older backfill."""
     init_router(db)
