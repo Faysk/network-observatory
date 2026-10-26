@@ -30,6 +30,7 @@ vm.runInContext(source.slice(source.indexOf('function appOnline()'),source.index
 assert.equal(inventoryContext.count(),null,'Pending inventory is unknown, not zero');
 inventoryContext.state.resources.inventory.phase='empty';assert.equal(inventoryContext.count(),0);
 inventoryContext.state.resources.inventory.phase='error';assert.equal(inventoryContext.count(),null);
+inventoryContext.state.clients=[{quality:'ok',reported_status:'Online'}];inventoryContext.state.resources.inventory={phase:'loading',at:123};assert.equal(inventoryContext.count(),1,'Known count should survive refresh');inventoryContext.state.resources.inventory.phase='stale';assert.equal(inventoryContext.count(),null,'Failed refresh must not label old count live');
 console.log('Inventory feedback: loading/error stay unknown; confirmed empty stays zero.');
 
 // Preview samples are intentionally sparse; connect adjacent sampled buckets.
