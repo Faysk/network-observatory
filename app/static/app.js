@@ -7,7 +7,7 @@ const time=v=>v?new Date(v).toLocaleString('pt-PT',{day:'2-digit',month:'short',
 const retention=days=>days===0?'Sem limite':days==null?'Sem informação':fmt(days,0)+' dias';
 const fresh=ts=>{const age=Date.now()-Date.parse(ts);return age>=-5000&&age<=180000;};
 const duration=v=>v==null?'Sem dados':`${Math.floor(v/3600)}h ${Math.floor(v%3600/60)}m`;
-const state={status:null,overview:null,clients:[],metric:null,period:'24h',bundle:null,filter:'all',main:true,secondary:true,request:0,api:false,resources:{
+const state={status:null,overview:null,clients:[],metric:null,counterMode:'observed',period:'24h',bundle:null,filter:'all',main:true,secondary:true,request:0,api:false,resources:{
  status:{phase:'idle'},overview:{phase:'idle'},inventory:{phase:'idle'}
  }};
 const config={
@@ -153,7 +153,8 @@ function seriesPath(series,key,period,x,y){
  for(const p of series){
    const value=p[key];if(!Number.isFinite(value)){previous=null;continue;}
    const incomplete=!period.sampled_preview&&(p.max_gap_seconds>180||(p.values?.[key]?.sample_count<p.sample_count));
-   const counterDrop=previous&&['wan_rx_bytes','wan_tx_bytes'].includes(key)&&(value<previous[key]||(p.counter_epochs?.[key]!=null&&previous.counter_epochs?.[key]!=null&&p.counter_epochs[key]!==previous.counter_epochs[key]));
+   const epochs=key.includes('_observed_')?'observed_epochs':'counter_epochs';
+   const counterDrop=previous&&key.startsWith('wan_')&&(value<previous[key]||(p[epochs]?.[key]!=null&&previous[epochs]?.[key]!=null&&p[epochs][key]!==previous[epochs][key]));
    const gap=counterDrop||previous&&(period.sampled_preview?
      Math.floor((Date.parse(p.timestamp)-origin)/(resolution*1000))-Math.floor((Date.parse(previous.timestamp)-origin)/(resolution*1000))>1:
      Date.parse(p.timestamp)-Date.parse(previous.timestamp_end||previous.timestamp)>180000);
@@ -190,12 +191,12 @@ function chart(node,series,defs,period,selection){
  line.setAttribute('x1',xx);line.setAttribute('x2',xx);line.setAttribute('opacity','1');line.setAttribute('stroke-dasharray','4 5');
  markers.innerHTML=defs.filter(d=>Number.isFinite(p[d.key])).map(d=>`<circle cx="${xx}" cy="${y(p[d.key]/(d.scale||1))}" r="5" fill="${d.color}" stroke="#161021" stroke-width="2"/>`).join('');
  const stamp=new Date(p.timestamp).toLocaleString('pt-PT',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
- tip.innerHTML=`<strong class="inspector-time">${esc(stamp)}</strong>${defs.map(d=>{const v=p[d.key],stats=p.values?.[d.key];return `<div class="inspector-row"><span><svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="3.5" fill="${d.color}"/></svg>${esc(d.label)}</span><b>${Number.isFinite(v)?esc(fmt(v/(d.scale||1),3)):'Sem dados'} <small>${esc(d.unit||'')}</small></b></div>${stats&&stats.min!==stats.max?`<div class="inspector-range">Mín. ${esc(fmt(stats.min/(d.scale||1),3))} · Máx. ${esc(fmt(stats.max/(d.scale||1),3))} ${esc(d.unit||'')}</div>`:''}`;}).join('')}<span class="inspector-meta">${esc(p.sample_count??1)} amostras · ${p.values?'média do intervalo':'observação original'}${p.max_gap_seconds>180?' · contém lacuna':''}${distance==null?'':' · leitura mais próxima ('+fmt(distance/60,1)+' min do cursor)'}</span>`;
+ tip.innerHTML=`<strong class="inspector-time">${esc(stamp)}</strong>${defs.map(d=>{const v=p[d.key],stats=p.values?.[d.key];return `<div class="inspector-row"><span><svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="3.5" fill="${d.color}"/></svg>${esc(d.label)}</span><b>${Number.isFinite(v)?esc(fmt(v/(d.scale||1),3)):'Sem dados'} <small>${esc(d.unit||'')}</small></b></div>${stats&&stats.min!==stats.max?`<div class="inspector-range">Mín. ${esc(fmt(stats.min/(d.scale||1),3))} · Máx. ${esc(fmt(stats.max/(d.scale||1),3))} ${esc(d.unit||'')}</div>`:''}`;}).join('')}<span class="inspector-meta">${esc(p.sample_count??1)} amostras · ${defs.some(d=>d.key.includes('_observed_'))?'soma de incrementos válidos':p.values?'média do intervalo':'observação original'}${p.max_gap_seconds>180?' · contém lacuna':''}${distance==null?'':' · leitura mais próxima ('+fmt(distance/60,1)+' min do cursor)'}</span>`;
  tip.hidden=false;
  // Use the actual SVG matrix: aspect-ratio letterboxing must not offset the cursor.
  const point=svg.createSVGPoint();point.x=xx;point.y=top;const screen=point.matrixTransform(svg.getScreenCTM()),box=node.getBoundingClientRect();
  const pos=screen.x-box.left;tip.style.left=Math.max(8,Math.min(box.width-tip.offsetWidth-8,pos+16>box.width-tip.offsetWidth?pos-tip.offsetWidth-16:pos+16))+'px';tip.style.top=Math.max(4,screen.y-box.top+8)+'px';
- if(selection)selection.textContent=`${stamp} · ${defs.map(d=>`${d.label}: ${fmt(p[d.key]==null?null:p[d.key]/(d.scale||1),3)} ${d.unit||''}`).join(' · ')} · ${p.sample_count??1} amostras · média do intervalo`;
+ if(selection)selection.textContent=`${stamp} · ${defs.map(d=>`${d.label}: ${fmt(p[d.key]==null?null:p[d.key]/(d.scale||1),3)} ${d.unit||''}`).join(' · ')} · ${p.sample_count??1} amostras · ${defs.some(d=>d.key.includes('_observed_'))?'soma de incrementos válidos':p.values?'média do intervalo':'observação original'}`;
  }
  function pointer(e){const matrix=svg.getScreenCTM();if(!matrix)return;const point=svg.createSVGPoint();point.x=e.clientX;point.y=e.clientY;const local=point.matrixTransform(matrix.inverse()),t=start+Math.max(0,Math.min(1,(local.x-left)/(width-left-right)))*(end-start);let best=0;
  for(let i=1;i<valid.length;i++)if(Math.abs(Date.parse(valid[i].timestamp)-t)<Math.abs(Date.parse(valid[best].timestamp)-t))best=i;
@@ -284,6 +285,7 @@ function updateSheetMeta(){
  $('#detailEyebrow').textContent='INVESTIGAÇÃO / LEITURAS REAIS';
  $$('[data-period]').forEach(el=>{const active=el.dataset.period===state.period;
    el.classList.toggle('active',active);el.setAttribute('aria-pressed',String(active))});
+ if(observed)for(const d of defs){d.key=d.key.replace('_bytes','_observed_bytes');d.label=d.label.replace('Contador','Incrementos');}
  $('#legendBox').innerHTML=[
    ...(c.a?[['main',c.main,state.main]]:[]),
    ...(c.b?[['secondary',c.secondary,state.secondary]]:[])
@@ -333,23 +335,27 @@ async function loadSheet(){
 }
 function renderSheet(){const c=config[state.metric],b=state.bundle;if(!c||!b)return;$('#detailTitle').textContent=c.title;$('#detailCrumb').textContent=c.title.toUpperCase();$('#detailDesc').textContent=c.desc;$('#detailEyebrow').textContent='INVESTIGAÇÃO / LEITURAS REAIS';$('#chartTitle').textContent=c.title;$('#chartSubtitle').textContent=`${time(b.period.from)} — ${time(b.period.to)} · ${state.metric==='traffic'&&b.counter_series?'observações originais; quebras preservadas':'médias por intervalo; extremos preservados'}`;
  $$('[data-period]').forEach(el=>{const active=el.dataset.period===state.period;el.classList.toggle('active',active);el.setAttribute('aria-pressed',active);});
+ const observed=state.metric==='traffic'&&state.counterMode!=='raw'&&b.counter_period?.observed_increments;
+ if(observed){$('#detailTitle').textContent=$('#chartTitle').textContent='Incrementos WAN observados';$('#detailDesc').textContent='Soma dos aumentos entre leituras consecutivas válidas. Quedas e lacunas são excluídas; pode estar incompleta. Não é consumo total nem velocidade.';$('#chartSubtitle').textContent=`${time(b.period.from)} — ${time(b.period.to)} · somado antes da redução de pontos; quebras preservadas`;}
  const defs=[...(c.a&&state.main?[{key:c.a,label:c.main,color:'#c3a4ff',scale:c.scale,unit:c.unit}]:[]),...(c.b&&state.secondary?[{key:c.b,label:c.secondary,color:'#69e9dc',scale:c.scale,unit:c.unit}]:[])];
- $('#legendBox').innerHTML=[...(c.a?[['main',c.main,state.main]]:[]),...(c.b?[['secondary',c.secondary,state.secondary]]:[])].map(([key,label,on])=>`<button class="legend-button ${on?'':'off'}" data-series="${key}" aria-pressed="${on}">${esc(label)}</button>`).join('');
+ if(observed)for(const d of defs){d.key=d.key.replace('_bytes','_observed_bytes');d.label=d.label.replace('Contador','Incrementos');}
+ $('#legendBox').innerHTML=[...(c.a?[['main',c.main,state.main]]:[]),...(c.b?[['secondary',c.secondary,state.secondary]]:[])].map(([key,label,on])=>`<button class="legend-button ${on?'':'off'}" data-series="${key}" aria-pressed="${on}">${esc(observed?label.replace('Contador','Incrementos'):label)}</button>`).join('')+(state.metric==='traffic'?`<button class="legend-button" data-counter-mode="${observed?'raw':'observed'}">${observed?'Ver contadores brutos':'Ver incrementos observados'}</button>`:'');
  if(defs.length)chart($('#historyChart'),state.metric==='traffic'&&b.counter_series?b.counter_series:c.probes?b.probes:b.series,defs,state.metric==='traffic'&&b.counter_period?b.counter_period:b.period,$('#selectionSummary'));else $('#historyChart').innerHTML=empty('Consulta as fontes e eventos abaixo. Não existe uma série numérica para esta vista.');
  const stats=c.probes?b.probe_stats:b.stats,a=stats[c.a]||{};
  $('#detailStats').innerHTML=tile('Mínimo',fmt(a.min==null?null:a.min/c.scale),c.unit,'Valor real no arquivo')+tile('Média amostral',fmt(a.avg==null?null:a.avg/c.scale),c.unit,'Média aritmética das leituras')+tile('Máximo',fmt(a.max==null?null:a.max/c.scale),c.unit,'Extremo preservado')+tile('Amostras válidas',fmt(a.sample_count||0,0),'','Desta métrica no período');
+ if(observed){const rx=observed.wan_rx_bytes,tx=observed.wan_tx_bytes;$('#detailStats').innerHTML=tile('Incrementos RX',fmt(rx.bytes==null?null:rx.bytes/2**30),'GiB','Soma dos aumentos válidos; pode estar incompleta')+tile('Incrementos TX',fmt(tx.bytes==null?null:tx.bytes/2**30),'GiB','Sem correção presumida de volta do contador')+tile('Pares válidos RX / TX',`${rx.valid_pairs} / ${tx.valid_pairs}`,'','Leituras consecutivas até 180 s')+tile('Transições excluídas RX / TX',`${rx.excluded_transitions} / ${tx.excluded_transitions}`,'','Quedas, lacunas ou dados inválidos');}
  if(!c.a)$('#detailStats').innerHTML=tile('Eventos no período',fmt(b.events.length,0),'','Registros persistidos')+tile('Avisos',fmt(b.events.filter(e=>e.severity==='warning').length,0))+tile('Críticos',fmt(b.events.filter(e=>e.severity==='critical').length,0))+tile('Cobertura da coleta',fmt(b.quality.coverage_percent),'%');
  $('#resolutionText').textContent=`Intervalos de ${duration(b.period.resolution_seconds)} · cobertura router ${fmt(b.quality.coverage_percent)}%`;
- $('#analysisText').textContent=c.desc;$('#analysisRows').innerHTML=keyvals([['Fonte','huawei-b7-http / TCP local conforme métrica'],['Amostras router',b.quality.sample_count],['Esperadas a cada 60s',b.quality.expected_count],['Cobertura router',fmt(b.quality.coverage_percent)+'%']])+panelExtras(state.metric);
+ $('#analysisText').textContent=observed?$('#detailDesc').textContent:c.desc;$('#analysisRows').innerHTML=keyvals([['Fonte','huawei-b7-http / TCP local conforme métrica'],['Amostras router',b.quality.sample_count],['Esperadas a cada 60s',b.quality.expected_count],['Cobertura router',fmt(b.quality.coverage_percent)+'%']])+panelExtras(state.metric);
  const events=b.events.filter(e=>state.filter==='all'||['warning','critical'].includes(e.severity));$('#detailEvents').innerHTML=events.map(e=>`<div class="event-record"><span class="event-time">${esc(time(e.ts))}</span><div class="event-content"><strong>${esc(e.title)}</strong><span>${esc(e.detail)} · ${esc(e.source)}</span></div></div>`).join('')||empty('Sem eventos deste tipo no período.');
- $('#selectionSummary').textContent='Usa o rato ou as setas no gráfico para consultar as leituras. Intervalos sem dados não são interpolados.';$('#sheetFootnote').textContent='Fonte e período preservados. Sem taxas WAN corrigidas, sem pontuação artificial.';$('#exportCsv').disabled=false;$('#exportCsv').textContent=state.metric==='events'?'Exportar eventos exibidos (CSV)':'Exportar CSV dos intervalos';$('#exportCsv').hidden=state.metric==='integrations';
+ $('#selectionSummary').textContent='Usa o rato ou as setas no gráfico para consultar as leituras. Intervalos sem dados não são interpolados.';$('#sheetFootnote').textContent=observed?'Incrementos positivos somados nas amostras originais; transições excluídas não foram reconstruídas. Não representa consumo total.':'Fonte e período preservados. Sem taxas WAN corrigidas, sem pontuação artificial.';$('#exportCsv').disabled=false;$('#exportCsv').textContent=state.metric==='events'?'Exportar eventos exibidos (CSV)':'Exportar CSV dos intervalos';$('#exportCsv').hidden=state.metric==='integrations';
 }
 function download(name,text,mime){const url=URL.createObjectURL(new Blob([text],{type:mime})),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),5000);}
 function exportSummary(){
  if(!state.bundle)return;const b=state.bundle,c=config[state.metric],events=state.metric==='events';
- const rows=events?b.events.filter(e=>state.filter==='all'||['warning','critical'].includes(e.severity)):(c.probes?b.probes:b.series);
- const fields=events?['ts','severity','category','title','detail','source']:['timestamp','timestamp_end','sample_count',c.a,c.b,c.a&&c.a+'_min',c.a&&c.a+'_max',c.b&&c.b+'_min',c.b&&c.b+'_max','source','aggregation'].filter(Boolean);
- const value=(p,k)=>{if(k==='source')return events?p.source:c.probes?'local_tcp_probe':'huawei-b7-http';if(k==='aggregation')return 'bucket_mean_with_min_max_envelope';if(k.endsWith('_min')||k.endsWith('_max')){const suffix=k.slice(-3);return p.values?.[k.slice(0,-4)]?.[suffix]??'';}return p[k]??'';};
+ const rows=events?b.events.filter(e=>state.filter==='all'||['warning','critical'].includes(e.severity)):(state.metric==='traffic'&&b.counter_series?b.counter_series:c.probes?b.probes:b.series);
+ const fields=events?['ts','severity','category','title','detail','source']:['timestamp','timestamp_end','sample_count',c.a,c.b,c.a&&c.a+'_min',c.a&&c.a+'_max',c.b&&c.b+'_min',c.b&&c.b+'_max',...(state.metric==='traffic'?['wan_rx_observed_bytes','wan_tx_observed_bytes']:[]),'source','aggregation'].filter(Boolean);
+ const value=(p,k)=>{if(k==='source')return events?p.source:c.probes?'local_tcp_probe':'huawei-b7-http';if(k==='aggregation')return state.metric==='traffic'&&b.counter_series?'original_counter_and_sum_of_valid_positive_deltas':'bucket_mean_with_min_max_envelope';if(k.endsWith('_min')||k.endsWith('_max')){const suffix=k.slice(-3);return p.values?.[k.slice(0,-4)]?.[suffix]??'';}return p[k]??'';};
  const csv=[fields,...rows.map(p=>fields.map(k=>value(p,k)))].map(row=>row.map(v=>{const text=String(v);return '"'+(/^[=+@]/.test(text)?"'"+text:text).replaceAll('"','""')+'"';}).join(',')).join('\r\n');
  download(`faysk-${state.metric}-${state.period}-intervalos.csv`,'\ufeff'+csv,'text/csv;charset=utf-8');
 }
@@ -361,7 +367,7 @@ function init(){
  $('#periodButtons').addEventListener('click',e=>{const el=e.target.closest('[data-period]');if(el&&state.period!==el.dataset.period){state.period=el.dataset.period;loadSheet();}});
  $('#historyChart').addEventListener('click',e=>{if(e.target.closest('[data-sheet-retry]'))loadSheet();});
  document.addEventListener('click',e=>{const b=e.target.closest('[data-retry-resource]');if(b)fetchResource(b.dataset.retryResource);});
- $('#legendBox').addEventListener('click',e=>{const el=e.target.closest('[data-series]');if(!el)return;state[el.dataset.series]=!state[el.dataset.series];if(!state.main&&!state.secondary)state.main=true;renderSheet();});
+ $('#legendBox').addEventListener('click',e=>{const mode=e.target.closest('[data-counter-mode]');if(mode){state.counterMode=mode.dataset.counterMode;renderSheet();return;}const el=e.target.closest('[data-series]');if(!el)return;state[el.dataset.series]=!state[el.dataset.series];if(!state.main&&!state.secondary)state.main=true;renderSheet();});
  $('#eventsFilter').addEventListener('click',()=>{state.filter=state.filter==='all'?'warning':'all';$('#eventsFilter').textContent=state.filter==='all'?'Todos':'Avisos';renderSheet();});
  $('#exportCsv').addEventListener('click',exportSummary);$('#infoBtn').addEventListener('click',()=>openSheet('integrations'));
  $('#menuToggle').addEventListener('click',()=>{const on=$('#sidebar').classList.toggle('open');$('#menuToggle').setAttribute('aria-expanded',on);});

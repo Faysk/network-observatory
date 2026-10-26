@@ -69,21 +69,29 @@ class CounterPreview:
     def __init__(self,start,end):
         self.start=start;self.end=end;self.width=max(60,math.ceil((end-start).total_seconds()/360))
         self.points={};self.previous={};self.previous_timestamp=None;self.epochs={'wan_rx_bytes':0,'wan_tx_bytes':0}
+        self.totals={k:0 for k in self.epochs};self.pairs={k:0 for k in self.epochs};self.excluded={k:0 for k in self.epochs}
     def add(self,ts,values):
         point={'timestamp':ts,'timestamp_end':ts,'sample_count':1,'max_gap_seconds':0}
-        if self.previous_timestamp is not None and stamp(ts)-self.previous_timestamp>180:
+        elapsed=stamp(ts)-self.previous_timestamp if self.previous_timestamp is not None else None
+        if elapsed is not None and elapsed>180:
             for key in self.epochs:self.epochs[key]+=1
         self.previous_timestamp=stamp(ts)
         for key in self.epochs:
             value=values.get(key);old=self.previous.get(key)
             valid=type(value) in (int,float) and math.isfinite(value) and value>=0
             if old is not None and (not valid or value<old):self.epochs[key]+=1
+            if old is not None and valid and elapsed is not None and 0<elapsed<=180 and value>=old:
+                self.totals[key]+=value-old;self.pairs[key]+=1
+            elif elapsed is not None:self.excluded[key]+=1
+            point[key.replace('_bytes','_observed_bytes')]=self.totals[key] if valid and self.pairs[key] else None
             point[key]=value if valid else None;self.previous[key]=value if valid else None
         point['counter_epochs']=dict(self.epochs)
+        point['observed_epochs']={k.replace('_bytes','_observed_bytes'):v for k,v in self.epochs.items()}
         index=int((stamp(ts)-self.start.timestamp())//self.width);self.points[index]=point
     def result(self):
         return [p for _,p in sorted(self.points.items())],{'key':next((k for k,v in PERIODS.items() if v==int((self.end-self.start).total_seconds())),None),'from':self.start.isoformat(),'to':self.end.isoformat(),
             'resolution_seconds':self.width,'sampled_preview':self.width>180,
+            'observed_increments':{k:{'bytes':self.totals[k] if self.pairs[k] else None,'valid_pairs':self.pairs[k],'excluded_transitions':self.excluded[k]} for k in self.epochs},
             'semantics':'original_last_observation_per_bucket; known_resets_break_lines; not_throughput'}
 
 def _device_history_uncached(identifier,period='24h'):
