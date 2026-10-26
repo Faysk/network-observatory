@@ -170,6 +170,8 @@ function chart(node,series,defs,period,selection){
  defs.forEach(d=>{
    const path=seriesPath(series,d.key,period,x,v=>y(v/(d.scale||1)));
    for(const p of series){const extrema=p.values?.[d.key];if(Number.isFinite(p[d.key])&&extrema&&extrema.min!==extrema.max)content+=`<line x1="${x(p.timestamp)}" x2="${x(p.timestamp)}" y1="${y(extrema.min/(d.scale||1))}" y2="${y(extrema.max/(d.scale||1))}" stroke="${d.color}" opacity=".35"/>`;}
+   // A genuinely isolated observation must remain visible without inventing a link.
+   for(const segment of path.matchAll(/M(-?[\d.]+),(-?[\d.]+)([^M]*)/g))if(!segment[3].includes('L'))content+=`<circle cx="${segment[1]}" cy="${segment[2]}" r="1.5" fill="${d.color}"/>`;
    content+=`<path class="history-series-line" d="${path}" fill="none" stroke="${d.color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>`;
  });
  node.innerHTML=`<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Histórico real com intervalos sem amostras">${content}<line class="inspect-line" x1="0" x2="0" y1="${top}" y2="${height-bottom}" stroke="#c5eadd" opacity="0"/><rect class="inspect-area" x="${left}" y="${top}" width="${width-left-right}" height="${height-top-bottom}" fill="transparent" tabindex="0" role="img" aria-label="Inspecionar amostras com setas esquerda e direita"/></svg>`;
