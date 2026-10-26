@@ -555,10 +555,24 @@ function renderChanges(data){
  }
  if(data.changes_truncated)changes.append(node('p','A prévia mostra até 500 alterações. Use um período menor; os registos originais permanecem no arquivo.'));
 }
-let operationsLoaded=false;
+let operationsLoaded=false,operationsHistoryData=null;
+function renderOperationsHistory(){
+ if(!operationsTrend.open||!operationsHistoryData)return;
+ const oldMetric=operationsTrendBody.querySelector('select')?.value;
+ operationsTrendBody.replaceChildren();
+ const h=operationsHistoryData;
+ if(Array.isArray(h.points)&&h.points.length){
+   operationsTrendBody.append(trendPanel({title:'Saúde do Observatory',points:h.points,
+     metrics:h.metrics||[],cadence_seconds:60,truncated:h.truncated}));
+   const control=operationsTrendBody.querySelector('select');
+   if(control&&oldMetric&&[...control.options].some(o=>o.value===oldMetric)){
+     control.value=oldMetric;control.dispatchEvent(new Event('change'));
+   }
+ }else operationsTrendBody.append(node('p','Sem histórico do host disponível. A recolha no S7 pode ainda não estar ativa.'));
+}
+operationsTrend.addEventListener('toggle',renderOperationsHistory);
 function renderOperations(result){
  operationsLoaded=true;operationsMetrics.replaceChildren();operationsAlerts.replaceChildren();
- operationsTrendBody.replaceChildren();
  const h=result.health||{},active=Array.isArray(result.alerts)?result.alerts:[];
  operationsStatus.textContent=active.some(x=>x.severity==='critical')?'Estado crítico':
    active.some(x=>x.severity==='warning')?'Requer atenção':
@@ -590,13 +604,8 @@ function renderOperations(result){
  footer.append(node('small','Regras: '+(result.rulesSource==='local_file'?'configuração local':result.rulesSource==='defaults'?'valores padrão':result.rulesSource||'não identificada')+
   ' · Apenas alertas passivos nesta página. Não são enviados e-mails ou notificações externas.'));
  operationsAlerts.append(footer);
- const historical=result.history||{};
- if(Array.isArray(historical.points)&&historical.points.length){
-   const expanded=trendPanel({title:'Saúde do Observatory',points:historical.points,
-     metrics:historical.metrics||[],cadence_seconds:60,truncated:historical.truncated});
-   operationsTrendBody.append(expanded);
- }else operationsTrendBody.append(node('p','Sem histórico do host disponível. A recolha no S7 pode ainda não estar ativa.'));
-}
+ operationsHistoryData=result.history||{};
+ if(operationsTrend.open)renderOperationsHistory();
 async function loadOperations(){
  try{
   const result=await get('/api/router/operations');
@@ -616,6 +625,6 @@ function render(data){
  unsupported.replaceChildren(...Object.values(data.unsupported||{}).map(v=>node('li',v)));
  notice.textContent=data.sources.filter(s=>s.quality==='ok').length+'/'+data.sources.length+' fontes atuais · consulta '+time(new Date().toISOString())+'.';
 }
-async function load(){if(busy){pendingReload=true;return;}busy=true;refresh.disabled=true;notice.textContent='A consultar leituras guardadas…';try{payload=await get(`/api/router/observability?hours=${period.value}`);render(payload);loadOperations();}catch{notice.textContent='API indisponível. Os valores apresentados pertencem à última consulta bem-sucedida.';}finally{busy=false;refresh.disabled=false;if(pendingReload){pendingReload=false;load();}}}
-refresh.addEventListener('click',()=>{load();loadOperations();});period.addEventListener('change',load);download.addEventListener('click',()=>{if(!payload)return;const url=URL.createObjectURL(new Blob([JSON.stringify(payload,null,2)],{type:'application/json'})),a=node('a');a.href=url;a.download='router-observations-private.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});load();setInterval(()=>{if(!document.hidden&&!panel.contains(document.activeElement))load();},60000);
+async function load(){if(busy){pendingReload=true;return;}busy=true;refresh.disabled=true;notice.textContent='A consultar leituras guardadas…';try{payload=await get(`/api/router/observability?hours=${period.value}`);render(payload);}catch{notice.textContent='API indisponível. Os valores apresentados pertencem à última consulta bem-sucedida.';}finally{busy=false;refresh.disabled=false;loadOperations();if(pendingReload){pendingReload=false;load();}}}
+refresh.addEventListener('click',load);period.addEventListener('change',load);download.addEventListener('click',()=>{if(!payload)return;const url=URL.createObjectURL(new Blob([JSON.stringify(payload,null,2)],{type:'application/json'})),a=node('a');a.href=url;a.download='router-observations-private.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});load();setInterval(()=>{if(!document.hidden&&!panel.contains(document.activeElement))load();},60000);
 })();
