@@ -114,7 +114,7 @@ def sizes_and_storage(path):
     return file_info
 
 
-def history(host_db, now, limit=360):
+def history(host_db, now, limit=480):
     """Use only recent already archived host samples. Avoid full JSON archive scan."""
     if not host_db.is_file():
         return [], False
@@ -254,7 +254,7 @@ def read(now=None, host_snapshot=None, changes=None, rules=None):
         'alertCount':len(out),
         'rules':rules,
         'rulesSource':rules_source,
-        'history':{'points':points,'truncated':truncated,'sampling':'existing S7 telemetry only, at most 360 most recent observations in 24 h',
+        'history':{'points':points,'truncated':truncated,'sampling':'existing S7 telemetry only, at most 480 most recent observations in 24 h',
                    'metrics':[{'key':'rss_mb','label':'RAM do processo','unit':'MB'},
                               {'key':'database_mb','label':'Tamanho SQLite principal','unit':'MB'},
                               {'key':'sd_free_gib','label':'MicroSD livre','unit':'GiB'},
