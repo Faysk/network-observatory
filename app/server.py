@@ -193,6 +193,13 @@ class Handler(BaseHTTPRequestHandler):
                     result=trend(db,query.get('source',[''])[0],query.get('hours',[24])[0],
                                  query.get('limit',[400])[0])
                 return self.respond(200,result)
+            if path.path == '/api/router/observability/archive/recent':
+                from .router_observability import archive_recent
+                query=parse_qs(path.query)
+                with core.LOCK,core.connect() as db:
+                    result=archive_recent(db,query.get('source',[''])[0],
+                                          query.get('before',[0])[0],query.get('limit',[50])[0])
+                return self.respond(200,result)
             if path.path == '/api/router/observability/archive':
                 from .router_observability import archive
                 query=parse_qs(path.query)
