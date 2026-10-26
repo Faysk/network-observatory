@@ -69,6 +69,30 @@ class ObservationTests(unittest.TestCase):
         bare=examples['station_details'].split(';',1)[1]
         self.assertEqual(o.parse('station_details',bare),o.parse('station_details',examples['station_details']))
 
+    def test_recent_archive_pagination_preserves_existing_ascending_archive(self):
+        db=sqlite3.connect(':memory:')
+        db.row_factory=sqlite3.Row
+        try:
+            o.init_db(db)
+            anchor=datetime.now(timezone.utc)-timedelta(minutes=21)
+            for i in range(5):
+                ts=(anchor+timedelta(minutes=i)).isoformat()
+                db.execute("INSERT INTO router_observations(source,ts,status,reason,payload) VALUES(?,?,?,?,?)",
+                           ('upnp',ts,'ok',None,json.dumps([{'external_port':1000+i}])))
+            newest=o.archive_recent(db,'upnp',limit=2)
+            self.assertEqual([v['data'][0]['external_port'] for v in newest['records']],[1004,1003])
+            self.assertTrue(newest['has_more'])
+            older=o.archive_recent(db,'upnp',before=newest['next_before'],limit=2)
+            self.assertEqual([v['data'][0]['external_port'] for v in older['records']],[1002,1001])
+            oldest=o.archive_recent(db,'upnp',before=older['next_before'],limit=2)
+            self.assertEqual([v['data'][0]['external_port'] for v in oldest['records']],[1000])
+            self.assertFalse(oldest['has_more'])
+            self.assertEqual(o.archive(db,'upnp',limit=2)['records'][0]['data'][0]['external_port'],1000)
+            for kwargs in ({'source':'unknown'}, {'source':'upnp','limit':101},
+                           {'source':'upnp','before':-1}):
+                with self.assertRaises(ValueError):o.archive_recent(db,**kwargs)
+        finally:db.close()
+
     def test_source_trends_are_bounded_indexed_and_private(self):
         db=sqlite3.connect(':memory:')
         db.row_factory=sqlite3.Row
