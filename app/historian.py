@@ -64,6 +64,28 @@ class Buckets:
                            'max_gap_seconds':bucket['max_gap_seconds'],'values':values,**{k:v['avg'] for k,v in values.items()}})
         return points,{k:finish(v) for k,v in self.stats.items()}
 
+class CounterPreview:
+    """Bounded original observations; never average a wrapping byte counter."""
+    def __init__(self,start,end):
+        self.start=start;self.end=end;self.width=max(60,math.ceil((end-start).total_seconds()/360))
+        self.points={};self.previous={};self.previous_timestamp=None;self.epochs={'wan_rx_bytes':0,'wan_tx_bytes':0}
+    def add(self,ts,values):
+        point={'timestamp':ts,'timestamp_end':ts,'sample_count':1,'max_gap_seconds':0}
+        if self.previous_timestamp is not None and stamp(ts)-self.previous_timestamp>180:
+            for key in self.epochs:self.epochs[key]+=1
+        self.previous_timestamp=stamp(ts)
+        for key in self.epochs:
+            value=values.get(key);old=self.previous.get(key)
+            valid=type(value) in (int,float) and math.isfinite(value) and value>=0
+            if old is not None and (not valid or value<old):self.epochs[key]+=1
+            point[key]=value if valid else None;self.previous[key]=value if valid else None
+        point['counter_epochs']=dict(self.epochs)
+        index=int((stamp(ts)-self.start.timestamp())//self.width);self.points[index]=point
+    def result(self):
+        return [p for _,p in sorted(self.points.items())],{'key':next((k for k,v in PERIODS.items() if v==int((self.end-self.start).total_seconds())),None),'from':self.start.isoformat(),'to':self.end.isoformat(),
+            'resolution_seconds':self.width,'sampled_preview':self.width>180,
+            'semantics':'original_last_observation_per_bucket; known_resets_break_lines; not_throughput'}
+
 def _device_history_uncached(identifier,period='24h'):
     mac=device_mac(identifier);start,end=window(period)
     keys=('rssi_dbm','snr_db','link_rx_phy_mbps','link_tx_phy_mbps','download_mbps','upload_mbps','latency_lan_ms','presence')
@@ -128,17 +150,19 @@ def device_history(identifier,period='24h'):
 def _overview_history_uncached(period='24h'):
     start,end=window(period)
     keys=('cpu_pct','memory_pct','optical_rx_dbm','optical_tx_dbm','wan_rx_bytes','wan_tx_bytes','online_clients','rssi_dbm')
+    counters=CounterPreview(start,end)
     buckets=Buckets(start,end,keys);probes=Buckets(start,end,('router_ms','internet_ms','router_online','internet_online'))
     with core.connect() as db:
         db.execute('BEGIN')
         coverage=observation_coverage(db,'huawei_samples',start,end)
         for ts,point in read_models.overview_rows(db,start.isoformat(),end.isoformat()):
-            buckets.add({'timestamp':ts,**point})
+            buckets.add({'timestamp':ts,**point});counters.add(ts,point)
         for row in db.execute('SELECT * FROM samples WHERE ts>=? AND ts<=? ORDER BY ts,id',(start.isoformat(),end.isoformat())):
             p=dict(row);p['timestamp']=p['ts'];probes.add(p)
         events=[dict(r) for r in db.execute('SELECT * FROM events WHERE ts>=? AND ts<=? ORDER BY ts DESC LIMIT 1001',(start.isoformat(),end.isoformat()))]
+    counter_points,counter_period=counters.result()
     points,stats=buckets.result();probe_points,probe_stats=probes.result()
-    return {'period':{'key':period,'from':start.isoformat(),'to':end.isoformat(),'resolution_seconds':buckets.width},'series':points,'stats':stats,
+    return {'period':{'key':period,'from':start.isoformat(),'to':end.isoformat(),'resolution_seconds':buckets.width},'series':points,'stats':stats,'counter_series':counter_points,'counter_period':counter_period,
             'probes':probe_points,'probe_stats':probe_stats,'events':events[:1000],'events_truncated':len(events)>1000,
             'source':SOURCE,'source_type':'router_gui_readonly','confidence':'reported','collected_at':points[-1]['timestamp_end'] if points else None,
             'sample_coverage':coverage,
@@ -172,6 +196,9 @@ def overview_summary(period='24h'):
     with core.connect() as db:
         db.execute('BEGIN')
         coverage=observation_coverage(db,'huawei_samples',start,end)
+        counter_start=max(start,end-timedelta(hours=1));counters=CounterPreview(counter_start,end)
+        for ts,point in read_models.overview_rows(db,counter_start.isoformat(),end_iso):counters.add(ts,point)
+        counter_points,counter_period=counters.result()
         # Both coverage and underlying original records remain exact.
         count=coverage['sample_count']
         # At most one original reading per summary bucket, using ID index on the second pass.
@@ -211,7 +238,7 @@ def overview_summary(period='24h'):
                                             'ORDER BY ts DESC LIMIT 3',(start_iso,end_iso))]
     expected=max(1,math.ceil(span/60))
     return {'period':{'key':period,'from':start_iso,'to':end_iso,'resolution_seconds':bucket},
-            'series':series,'probes':probes,'events':events,
+            'series':series,'probes':probes,'events':events,'counter_series':counter_points,'counter_period':counter_period,
             'quality':{**coverage,
                        'aggregation':'original_observations_sampled_for_preview'},
             'summary':{'sampled':True,'max_buckets':96,'raw_samples_retained':True,

@@ -29,6 +29,10 @@
   assert(d.querySelector('.hero-score').getAttribute('aria-busy')==='false','Coverage block stuck busy');
   assert(d.querySelector('.hero-score > .block-load-status').hidden,'Loading badge remained after response');
   assert(w.FNO.state.resources.inventory.phase==='empty','valid empty inventory misclassified');
+  const hover=d.querySelector('#overviewChart .inspect-area'),rect=hover.getBoundingClientRect();
+  hover.dispatchEvent(new w.PointerEvent('pointermove',{clientX:rect.left+rect.width*.4,clientY:rect.top+rect.height*.5,bubbles:true}));
+  assert(!d.querySelector('#overviewChart .chart-inspector').hidden,'Nearest reading should be accessible between points');
+  assert(d.querySelector('#overviewChart .chart-inspector').textContent.includes('leitura mais próxima'),'Nearest source must be explicit');
   notes.push('summary retry and [] inventory');
   const trigger=d.querySelector('.nav-item[data-detail="latency"]');
   trigger.focus();trigger.click();
@@ -36,7 +40,7 @@
   assert(d.getElementById('legendBox').textContent.includes('TCP gateway'),'stale legend inherited from traffic');
   assert(d.querySelector('[data-period="24h"]').getAttribute('aria-pressed')==='true','initial range not active');
   assert(d.getElementById('historyChart').getAttribute('aria-busy')==='true','loading missing aria busy');
-  notes.push('correct immediate legend/range');
+  assert(d.querySelector('#historyChart .load-placeholder'),'Chart skeleton missing');assert(d.querySelector('#detailStats .load-placeholder'),'Statistic skeletons missing');notes.push('correct immediate legend/range');
   d.querySelector('[data-period="7d"]').click();
   d.querySelector('[data-period="1y"]').click();
   assert(d.querySelector('[data-period="1y"]').getAttribute('aria-pressed')==='true','new period not selected immediately');

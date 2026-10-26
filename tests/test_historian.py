@@ -76,3 +76,17 @@ class HistorianTests(unittest.TestCase):
         finally:server.shutdown();server.server_close();worker.join(3)
 
 if __name__=='__main__':unittest.main()
+
+
+class CounterPreviewTests(unittest.TestCase):
+    def test_original_observation_and_hidden_reset_epoch_survive_sampling(self):
+        from app.historian import CounterPreview
+        start=datetime(2026,1,1,tzinfo=timezone.utc);end=start+timedelta(hours=24)
+        preview=CounterPreview(start,end)
+        for seconds,rx in [(0,30),(120,32),(241,35),(300,1),(400,36)]:
+            preview.add((start+timedelta(seconds=seconds)).isoformat(),{'wan_rx_bytes':rx,'wan_tx_bytes':50+seconds})
+        points,period=preview.result()
+        self.assertEqual([p['wan_rx_bytes'] for p in points],[32,36])
+        self.assertNotEqual(points[0]['counter_epochs']['wan_rx_bytes'],points[1]['counter_epochs']['wan_rx_bytes'])
+        self.assertEqual(points[0]['counter_epochs']['wan_tx_bytes'],points[1]['counter_epochs']['wan_tx_bytes'])
+        self.assertNotIn('values',points[1]);self.assertLessEqual(len(points),361)

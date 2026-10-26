@@ -288,7 +288,8 @@ def get_router_clients(mac=None, limit=120):
     """Retained client observations; absence is never inferred as offline."""
     from .adapters.huawei_b7 import normalise_mac,is_lan_client
     from .device_identity import get_registry, inspect_mac
-    from .device_classifier import classify_client
+    from .device_classifier import classify_client, meaningful_name
+    from .device_history_hints import hints
     from .device_preferences import read_presentation
     # One lazy, immutable registry per response; no lookup HTTP or database writes.
     # Configured main database is expected to live on microSD in S7 deployments.
@@ -319,6 +320,8 @@ def get_router_clients(mac=None, limit=120):
             # Read-only API enrichment: the original observation JSON is untouched.
             item['identity'] = inspect_mac(item.get('mac'), registry=registry)
             item['classification'] = classify_client(item, identity=item['identity'])
+            if item['quality']=='ok' and item.get('reported_status')=='Online' and item['classification']['category'] in ('unknown','android_device') and not any(meaningful_name(v) for v in item.get('names',[])):
+                item['classification']=classify_client(item,identity=item['identity'],history=hints(db,DB_PATH,item.get('mac')))
             item['presentation'] = read_presentation(db, item.get('mac'))
             result.append(item)
         from .device_groups import enrich

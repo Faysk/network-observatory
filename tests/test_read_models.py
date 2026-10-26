@@ -167,3 +167,10 @@ class MirrorTests(unittest.TestCase):
         for name,expected in metadata['sha256'].items():
             content=(root/'app/static/s7'/name).read_bytes().replace(b'\r\n',b'\n')
             self.assertEqual(hashlib.sha256(content).hexdigest(),expected,name+' mirror drift')
+
+    def test_shared_root_assets_are_versioned_with_integrated_release(self):
+        import hashlib
+        root=Path(__file__).resolve().parents[1]
+        metadata=json.loads((root/'docs/INTEGRATED_S7.json').read_text(encoding='utf-8'))
+        for name,expected in metadata['shared_root_sha256'].items():
+            self.assertEqual(hashlib.sha256((root/'app/static'/name).read_bytes().replace(b'\r\n',b'\n')).hexdigest(),expected)

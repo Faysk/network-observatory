@@ -30,6 +30,7 @@
     const types=Array.isArray(c?.device_types)?c.device_types:[];
     if(category==='game_console' && types.some(x=>typeof x==='string'&&/^PS5$/i.test(x.trim())))
       return 'PlayStation 5';
+    if(category==='game_console'&&/^nintendo/i.test(c?.identity?.oui_vendor||''))return 'Console Nintendo (provável)';
     if(category==='android_device')return 'Equipamento Android';
     if(category==='computer')return 'Computador';
     const generic={
@@ -40,7 +41,7 @@
       printer:'Impressora',camera:'Câmara',
       network_device:'Equipamento de rede',iot:'Dispositivo IoT'
     };
-    return generic[category] || (connection==='wifi'?'Dispositivo Wi-Fi não identificado':
+    return generic[category] || (c?.identity?.oui_vendor?'Dispositivo · '+c.identity.oui_vendor:null) || (connection==='wifi'?'Dispositivo Wi-Fi não identificado':
       connection==='wired'?'Dispositivo Ethernet não identificado':'Dispositivo não identificado');
   }
   function prepare(c){
@@ -48,8 +49,8 @@
     const mac=String(c?.mac||'');
     const connection=network(c);
     const effectiveCategory=c?.presentation?.category||c?.classification?.category||'unknown';
-    const named=names.find(meaningfulName);
-    return {...c, id:mac.replaceAll(':',''),name:c?.presentation?.nickname||named||suggestedName(c,effectiveCategory,connection),
+    const named=names.find(meaningfulName),historical=c?.classification?.display_name_source==='history'&&meaningfulName(c.classification.display_name_suggestion)?c.classification.display_name_suggestion:null;
+    return {...c, id:mac.replaceAll(':',''),name:c?.presentation?.nickname||named||historical||suggestedName(c,effectiveCategory,connection),
       hasReportedName:Boolean(named),effectiveCategory,
       station:Array.isArray(c?.stations)?c.stations[0]||{}:{},
       network:connection,recent:c?.quality==='ok',presence:presence(c)};

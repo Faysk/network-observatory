@@ -36,3 +36,5 @@ body.motion-paused .resource-block::after{animation:none!important}
 
 /* Long cadence/provenance copy must remain readable inside the score panel. */
 .hero-score .score-copy{min-width:0;flex:1}.hero-score .score-copy small{display:block;max-width:180px;white-space:normal;overflow-wrap:anywhere;line-height:1.5}
+
+.load-compact{min-height:100px;padding:16px;font-size:11px}.load-placeholder>span{position:relative;z-index:1;font-size:11px;color:var(--sub,var(--muted,#aaa))}body.motion-paused .load-placeholder::after{animation:none!important}

@@ -64,10 +64,11 @@ class OuiRegistry:
     IEEE public registry. No eager filesystem access at import time.
     """
 
-    def __init__(self, entries=None, version=None, path=None):
+    def __init__(self, entries=None, version=None, path=None, provider="ieee_public_assignment"):
         self.entries = dict(entries or {})
         self.version = version
         self.path = path
+        self.provider = provider
 
     @classmethod
     def from_file(cls, path):
@@ -78,6 +79,7 @@ class OuiRegistry:
             raise ValueError("OUI dataset exceeds safe runtime size")
         result = {}
         version = None
+        provider = "ieee_public_assignment"
         with path.open("r", encoding="utf-8", newline="") as stream:
             for number, line in enumerate(stream, 1):
                 if number > MAX_ENTRIES + 12:
@@ -85,6 +87,10 @@ class OuiRegistry:
                 line = line.rstrip("\r\n")
                 if line.startswith("# version="):
                     version = line[len("# version="):].strip()[:80]
+                    continue
+                if line.startswith("# provider="):
+                    provider=line.split("=",1)[1].strip()
+                    if provider not in ("ieee_public_assignment","wireshark_manuf"):raise ValueError("Unknown registry provider")
                     continue
                 if not line or line.startswith("#"):
                     continue
@@ -105,7 +111,7 @@ class OuiRegistry:
                 if key in result and result[key] != vendor:
                     raise ValueError("Conflicting assignee for same OUI prefix")
                 result[key] = vendor
-        return cls(result, version=version, path=str(path))
+        return cls(result, version=version, path=str(path), provider=provider)
 
     def lookup(self, normalized):
         """Most specific match wins. Caller must reject locally administered MAC."""
@@ -155,11 +161,12 @@ def inspect_mac(value, *, registry=None):
     if kind == "global" and registry.entries:
         vendor, prefix_bits = registry.lookup(normalized)
         if vendor is not None:
-            sources.append("ieee_public_assignment")
+            sources.append(registry.provider)
     return {
         "normalized_mac": normalized,
         "mac_type": kind,
         "oui_vendor": vendor,
+        "oui_source": registry.provider if vendor else None,
         "oui_prefix_bits": prefix_bits,
         "oui_dataset_version": registry.version,
         "sources": sources,

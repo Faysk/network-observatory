@@ -2,14 +2,14 @@
 
 No ML, lookup HTTP, port scanning, fingerprinting or per-device probes.
 A hostname/type is a *hint*, not proof; vendors of MAC interface blocks must
-not be treated as device models. Manual overrides are a separate future feature.
+not be treated as device models. Manual overrides are handled separately. Historical and vendor hints are not verified models.
 """
 from __future__ import annotations
 
 import re
 import unicodedata
 
-CLASSIFICATION_VERSION = "router-rules-v2"
+CLASSIFICATION_VERSION = "router-rules-v3"
 CATEGORIES = frozenset((
     "smartphone", "tablet", "laptop", "desktop", "game_console", "smart_tv",
     "streaming_box", "printer", "camera", "robot_vacuum", "network_device",
@@ -44,6 +44,7 @@ RULES = tuple((
     ("google_pixel", r"(?:^|\W)(?:google[-_ ]?)?pixel[-_ ]?[4-9](?:a|[-_ ]?pro)?(?:$|\W)", "smartphone", "android", "strong"),
     ("roomba", r"(?:^|\W)roomba(?:$|\W)", "robot_vacuum", None, "strong"),
     ("robot_vacuum", r"(?:^|\W)(?:roborock|ecovacs|deebot)(?:$|\W)", "robot_vacuum", None, "strong"),
+    ("mi_tv", r"(?:^|\W)(?:mi[-_ ]?tv|xiaomi[-_ ]?tv)(?:$|\W)", "smart_tv", "android", "strong"),
     ("smart_tv", r"(?:^|\W)(?:smart[-_ ]?tv|bravia|android[-_ ]?tv)(?:$|\W)", "smart_tv", None, "strong"),
     ("streaming_box", r"(?:^|\W)(?:chromecast|fire[-_ ]?tv|apple[-_ ]?tv|roku)(?:$|\W)", "streaming_box", None, "strong"),
     ("printer", r"(?:^|\W)(?:printer|deskjet|laserjet|officejet)(?:$|\W)", "printer", None, "strong"),
@@ -77,7 +78,7 @@ def _texts(client):
                 yield field, text
 
 
-def classify_client(client, *, identity=None):
+def _classify_current(client, *, identity=None):
     """Return a JSON-safe inference with no raw name/MAC/IP duplicated in evidence."""
     if not isinstance(client, dict):
         client = {}
@@ -129,7 +130,7 @@ def classify_client(client, *, identity=None):
 
     # Public OUI is only the assignee of the interface address block.
     if identity.get("oui_vendor") is not None and identity.get("mac_type") == "global":
-        evidence.append({"field": "mac", "rule": "ieee_block_assignee", "source": "ieee_public_assignment", "confidence": "low"})
+        evidence.append({"field": "mac", "rule": "ieee_block_assignee", "source": identity.get("oui_source") or "ieee_public_assignment", "confidence": "low"})
 
     # Predator is a hardware family spanning laptops and desktops. The
     # hostname alone does not determine the form factor; require an explicitly
@@ -190,3 +191,39 @@ def classify_client(client, *, identity=None):
         "classification_version": CLASSIFICATION_VERSION,
         "category_semantics": "heuristic_suggestion_not_verified_identity",
     }
+
+
+def meaningful_name(value):
+    return isinstance(value,str) and bool(value.strip()) and _normalize(value) not in ('wlan0','wifi','eth0','unknown','none','undefined','0','--') and not re.fullmatch(r'[0-9a-f:.-]{12,17}',_normalize(value))
+
+def classify_client(client, *, identity=None, history=None):
+    identity=identity if isinstance(identity,dict) else {};client=client if isinstance(client,dict) else {}
+    result=_classify_current(client,identity=identity)
+    name_values=client.get('names');type_values=client.get('device_types')
+    names=[_normalize(v) for v in (name_values[:16] if isinstance(name_values,(list,tuple)) else []) if meaningful_name(v)]
+    types=[_normalize(v) for v in (type_values[:16] if isinstance(type_values,(list,tuple)) else []) if isinstance(v,str)]
+    vendor=_normalize(identity.get('oui_vendor'));global_mac=identity.get('mac_type')=='global'
+    if not result['conflicts'] and result['category']=='unknown' and global_mac and vendor.startswith('nintendo'):
+        result.update(category='game_console',confidence='low')
+        result['evidence'].append({'field':'mac','rule':'nintendo_console_family_hint','source':identity.get('oui_source') or 'ieee_public_assignment','confidence':'low'})
+    if not result['conflicts'] and result['category']=='unknown' and global_mac and vendor in ('intel corporate','intel corporation') and names and 'msft 5.0' in types:
+        result.update(category='computer',confidence='low')
+        result['evidence'].append({'field':'mac/device_types/names','rule':'intel_and_microsoft_dhcp_named_host','source':'combined_router_and_public_assignment','confidence':'low'})
+    if result['category']=='android_device' and any(re.search(r'(?:^|[-_ ])s(?:[3-9]|1[0-9])(?:$|[-_ ])',name) for name in names):
+        result.update(category='smartphone',confidence='medium')
+        result['evidence'].append({'field':'names/device_types','rule':'legacy_galaxy_name_with_android_dhcp','source':'huawei_http_report','confidence':'medium'})
+    if not names and result['category'] in ('unknown','android_device') and not result['conflicts']:
+        candidates=[]
+        for previous in (history or [])[:8]:
+            hint=classify_client(previous,identity=identity)
+            if hint['category'] not in ('unknown','android_device'):candidates.append((previous,hint))
+        categories={hint['category'] for _,hint in candidates}
+        if len(categories)==1:
+            previous,hint=candidates[0]
+            if result['platform_family'] not in ('unknown',hint['platform_family']) and hint['platform_family']!='unknown':
+                result['conflicts'].append('historical_platform_conflict')
+            else:
+                result.update(category=hint['category'],confidence='low',platform_family=hint['platform_family'] if result['platform_family']=='unknown' else result['platform_family'],display_name_suggestion=hint['display_name_suggestion'],display_name_source='history',historical_observed_at=previous.get('observed_at'))
+                result['evidence'].append({'field':'historical_names/device_types','rule':'last_known_category','source':'retained_router_observation','confidence':'low','observed_at':previous.get('observed_at')})
+        elif len(categories)>1:result['conflicts'].append('conflicting_historical_categories')
+    return result
