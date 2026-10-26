@@ -14,6 +14,13 @@
   await wait(()=>d.querySelectorAll('.observation-source').length===3,'additional source panel');
   d.querySelector('a[href="#routerObservability"]').click();await wait(()=>w.location.hash==='#routerObservability','source navigation anchor');
   assert(d.querySelector('.observation-collector').textContent.includes('Autenticação bloqueada'),'collector authentication state missing');
+  assert(d.querySelectorAll('.observation-category-card').length===6,'five group entrypoints and panorama missing');
+  const navPolicies=d.querySelector('[data-observation-category="policies"]');
+  navPolicies.click();
+  assert(navPolicies.getAttribute('aria-pressed')==='true','group navigation did not set active group');
+  assert([...d.querySelectorAll('.observation-section')].filter(x=>!x.hidden).length===1,'group navigation did not filter sources');
+  d.querySelector('[data-observation-category="all"]').click();
+  assert([...d.querySelectorAll('.observation-section')].filter(x=>!x.hidden).length>=2,'all sources not restored');
   assert(d.querySelectorAll('.observation-kpi').length===4,'four overview metrics missing');
   assert(d.querySelectorAll('.observation-section').length>=2,'source thematic grouping missing');
   const search=d.querySelector('.observation-source-search');
