@@ -211,15 +211,18 @@ def read(now=None, host_snapshot=None, changes=None, rules=None):
             out.append(alert('db_growth','warning','Crescimento elevado do SQLite',
                              str(growth)+' MB/dia estimados a partir de '+str(round(span,1))+' h observadas.','database'))
         if changes is None:
-            try:
-                with core.LOCK, core.connect() as db:
-                    cutoff=(now-timedelta(minutes=rules['change_window_minutes'])).isoformat()
-                    changes=[dict(row) for row in db.execute(
-                        'SELECT id,source,previous_at,observed_at,crosses_gap FROM router_changes '
-                        'WHERE observed_at>=? AND observed_at<=? ORDER BY id DESC LIMIT 40',
-                        (cutoff,now.isoformat()))]
-            except (OSError, sqlite3.Error):
-                changes=[]
+            changes=[]
+            if store['volumeAccessible'] and core.DB_PATH.is_file():
+                try:
+                    with sqlite3.connect(core.DB_PATH.resolve().as_uri()+'?mode=ro',uri=True,timeout=1) as db:
+                        cutoff=(now-timedelta(minutes=rules['change_window_minutes'])).isoformat()
+                        changes=[dict(zip(('id','source','previous_at','observed_at','crosses_gap'),row))
+                            for row in db.execute(
+                            'SELECT id,source,previous_at,observed_at,crosses_gap FROM router_changes '
+                            'WHERE observed_at>=? AND observed_at<=? ORDER BY observed_at DESC,id DESC LIMIT 40',
+                            (cutoff,now.isoformat()))]
+                except (OSError, sqlite3.Error):
+                    changes=[]
         for item in (changes or [])[:40]:
             if item.get('source') not in rules['change_sources'] or item.get('crosses_gap'):
                 continue
