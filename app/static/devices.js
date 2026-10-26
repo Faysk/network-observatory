@@ -14,8 +14,8 @@ function preserveFocus(root, update){
 }
 function devices(){return Inventory.select(Array.isArray(app.clients)?app.clients:[],{sort:'status'});}
 function status(c){return {online:'Online reportado',offline:'Offline reportado',unknown:'Sem indicação',stale:'Sem leitura recente'}[c.presence||Inventory.presence(c)];}
-const DEVICE_CATEGORIES=new Set(['smartphone','tablet','laptop','desktop','game_console','smart_tv','streaming_box','printer','camera','robot_vacuum','network_device','iot','unknown']);
-const CATEGORY_LABELS={smartphone:'Smartphone provável',tablet:'Tablet provável',laptop:'Notebook provável',desktop:'Computador provável',game_console:'Console provável',smart_tv:'Smart TV provável',streaming_box:'Multimédia provável',printer:'Impressora provável',camera:'Câmara provável',robot_vacuum:'Aspirador robô provável',network_device:'Equipamento de rede provável',iot:'IoT provável',unknown:'Categoria desconhecida'};
+const DEVICE_CATEGORIES=new Set(['smartphone','tablet','laptop','desktop','game_console','smart_tv','streaming_box','printer','camera','robot_vacuum','network_device','iot','computer','android_device','unknown']);
+const CATEGORY_LABELS={smartphone:'Smartphone provável',tablet:'Tablet provável',laptop:'Notebook provável',desktop:'Computador provável',game_console:'Console provável',smart_tv:'Smart TV provável',streaming_box:'Multimédia provável',printer:'Impressora provável',camera:'Câmara provável',robot_vacuum:'Aspirador robô provável',network_device:'Equipamento de rede provável',iot:'IoT provável',computer:'Computador provável',android_device:'Equipamento Android provável',unknown:'Categoria desconhecida'};
 const PLATFORM_LABELS={android:'Android',ios:'iOS/iPadOS',windows:'Windows',linux:'Linux',macos:'macOS'};
 const CONFIDENCE_LABELS={high:'Alta',medium:'Média',low:'Baixa',unknown:'Desconhecida'};
 function categoryOf(c){const category=c?.presentation?.category||c?.classification?.category;return DEVICE_CATEGORIES.has(category)?category:'unknown';}
@@ -24,7 +24,9 @@ function categoryLabel(c){return c?.presentation?.category?CATEGORY_LABELS[categ
 function identitySubtitle(c){
  const label=categoryLabel(c);
  const platform=PLATFORM_LABELS[c?.classification?.platform_family];
- return label+(platform?' · '+platform:'');
+ // Do not repeat Android or imply a phone/tablet when only DHCP says Android.
+ const suffix=platform&&!(categoryOf(c)==='android_device'&&platform==='Android')?' · '+platform:'';
+ return label+suffix;
 }
 function row(c){return `<button class="device-list-row" data-open-device="${c.id}" aria-label="Ver detalhes e histórico de ${esc(c.name)}; ${esc(categoryLabel(c))}"><span class="device-label"><span class="device-avatar category-${categoryOf(c)}">${iconMarkup(c)}</span><span class="device-label-text"><strong>${esc(c.name)}</strong><small>${esc(identitySubtitle(c))}</small></span></span><span class="device-col"><small>Estado</small><span class="device-status ${!c.recent||c.reported_status!=='Online'?'offline':''}">${esc(status(c))}</span></span><span class="device-col"><small>Interface</small><strong>${esc(c.network==='wired'?'Ethernet':c.network==='wifi'?'Wi-Fi':'Não determinada')}</strong></span><span class="device-col"><small>Sinal / ligação</small><strong>${c.recent&&c.station.rssi_dbm!=null?fmt(c.station.rssi_dbm)+' dBm':c.network==='wired'?'Cabo LAN':'Sem dados'}</strong></span><span class="device-col"><small>Último IP reportado</small><strong>${esc(c.ips?.[0]||'Sem dados')}</strong></span><svg class="ic device-row-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></button>`;}
 function filtered(){return Inventory.select(Array.isArray(app.clients)?app.clients:[],state);}
