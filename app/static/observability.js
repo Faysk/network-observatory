@@ -113,12 +113,15 @@ function technical(source){
  const raw=node('details',undefined,'observation-raw'),head=node('summary','Inspecionar tabela técnica · '+(source.data?.length||0)+' linhas');
  const contents=node('div',undefined,'observation-raw-body');
  raw.append(head,contents);
- raw.addEventListener('toggle',()=>{
-   if(raw.open&&!contents.childNodes.length){
-     if(source.data?.length)contents.append(table(source.data,source));
-     else contents.append(node('p',source.data?'Nenhum registo nesta leitura.':'Leitura ainda indisponível.'));
-   }
- });
+ function loadRows(){
+   if(contents.childNodes.length)return;
+   if(source.data?.length)contents.append(table(source.data,source));
+   else contents.append(node('p',source.data?'Nenhum registo nesta leitura.':'Leitura ainda indisponível.'));
+ }
+ // Small tables are cheap and preserve full-text accessibility and inspection.
+ // Large inventories remain lazy so the initial page does not build thousands of TDs.
+ if(Array.isArray(source.data)&&source.data.length<=3)loadRows();
+ raw.addEventListener('toggle',()=>{if(raw.open)loadRows();});
  return raw;
 }
 function renderSources(data){
