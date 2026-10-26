@@ -99,9 +99,9 @@ class ClassifierRules(unittest.TestCase):
         for name in ("Fixture-S7", "TARS-Fixture", None):
             with self.subTest(name=name):
                 result=classify(name, ("android-dhcp-8.0.0",))
-                self.assertEqual(result["category"], "android_device")
+                self.assertEqual(result["category"], "smartphone" if name=="Fixture-S7" else "android_device")
                 self.assertEqual(result["platform_family"], "android")
-                self.assertEqual(result["confidence"], "low")
+                self.assertEqual(result["confidence"], "medium" if name=="Fixture-S7" else "low")
         self.assertEqual(classify("Galaxy-Tab-Fixture", ("android-dhcp-14",))["category"], "tablet")
         self.assertEqual(classify("Roomba-Fixture", ("android-dhcp-14",))["category"], "robot_vacuum")
         self.assertEqual(classify("PS5", ("android-dhcp-14",))["category"], "game_console")
@@ -150,6 +150,21 @@ class ClassifierRules(unittest.TestCase):
         result=classify('PS5')
         self.assertTrue(all(set(e)=={'field','rule','source','confidence'} for e in result['evidence']))
         self.assertNotIn('PS5',repr(result['evidence']))
+
+    def test_recent_retained_name_not_lost_when_current_name_is_blank(self):
+        r=classify_client({'names':[],'device_types':[]},history=[{'names':['MiTV'],'device_types':['android-dhcp-11'],'observed_at':'2026-01-01T00:00:00+00:00'}])
+        self.assertEqual(r['category'],'smart_tv');self.assertEqual(r['display_name_suggestion'],'MiTV')
+        self.assertEqual(r['display_name_source'],'history');self.assertEqual(r['confidence'],'low')
+        conflict=classify_client({'names':[]},history=[{'names':['MiTV']},{'names':['iPhone-15']}])
+        self.assertEqual(conflict['category'],'unknown');self.assertIn('conflicting_historical_categories',conflict['conflicts'])
+        current=classify_client({'names':['LaserJet-Printer']},history=[{'names':['MiTV']}])
+        self.assertEqual(current['category'],'printer');self.assertNotIn('display_name_source',current)
+    def test_vendor_hints_require_global_mac_and_corroboration(self):
+        r=classify('workstation-test',['MSFT 5.0'],{'mac_type':'global','oui_vendor':'Intel Corporate','oui_source':'wireshark_manuf'})
+        self.assertEqual(r['category'],'computer');self.assertEqual(r['platform_family'],'unknown');self.assertEqual(r['confidence'],'low')
+        self.assertEqual(classify('workstation-test',[],{'mac_type':'global','oui_vendor':'Intel Corporate'})['category'],'unknown')
+        self.assertEqual(classify(None,identity={'mac_type':'global','oui_vendor':'Nintendo Co.,Ltd'})['category'],'game_console')
+        self.assertEqual(classify(None,identity={'mac_type':'locally_administered','oui_vendor':'Nintendo Co.,Ltd'})['category'],'unknown')
 
     def test_input_order_and_invalid_types_are_safe(self):
         b={'names':['PS5','PS5'],'device_types':None,'ports':['Ethernet']}

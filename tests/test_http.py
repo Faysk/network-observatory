@@ -59,6 +59,13 @@ class HttpTests(unittest.TestCase):
             self.assertNotIn('synthetic',headers['Server-Timing'])
         self.assertNotIn('Server-Timing',self.request('/router/')[2])
 
+    def test_s7_shared_assets_resolve_from_server_root(self):
+        html=self.request('/s7/')[1].decode()
+        for asset in ('workspace.css','finish.css','finish.js','loading.css'):
+            self.assertIn('"/'+asset,html)
+            self.assertEqual(self.request('/'+asset)[0],200)
+        self.assertNotIn('href="workspace.css',html)
+
     def test_host_namespace_partial_and_static_isolation(self):
         from app.host_telemetry import HostMonitor, empty_snapshot
         m=HostMonitor(Path(self.temp.name)/'observatory.db')
