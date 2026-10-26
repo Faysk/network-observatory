@@ -2,6 +2,10 @@
 
 Dashboard local de rede com API Python, histórico SQLite, inventário e integração opcional de leitura com router Huawei. Inclui o backend de telemetria do host e uma cópia integrada do painel S7.
 
+## Configuração e diagnóstico do router
+
+O painel integra 28 fontes adicionais: Wi-Fi, clientes/DHCP, IPv6, UPnP, políticas, NAT e serviços USB/voz, com qualidade por fonte, histórico de diferenças, comparação antes/depois e arquivo paginado. Falha de autenticação deixa o coletor bloqueado e mantém o painel disponível. [Dados, APIs, cadência, privacidade e limites](docs/ROUTER_OBSERVABILITY.md).
+
 ## Executar
 
 Python 3.11 ou superior, sem dependências Python externas:

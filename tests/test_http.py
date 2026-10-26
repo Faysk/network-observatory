@@ -148,6 +148,16 @@ class HttpTests(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as error:self.request('/api/archive?kind=invalid')
         self.assertEqual(error.exception.code,400)
 
+    def test_observability_api(self):
+        data=json.loads(self.request('/api/router/observability?hours=24')[1])
+        self.assertEqual(data['poll_seconds'],300)
+        self.assertGreater(len(data['sources']),20)
+        self.assertIn('wifi_logs',data['unsupported'])
+        self.assertEqual(json.loads(self.request('/api/router/observability/archive?source=upnp')[1])['records'],[])
+        for path in ('/api/router/observability?hours=nan','/api/router/observability?hours=999999','/api/router/observability/archive?source=bad','/api/router/observability/archive?source=upnp&limit=501'):
+            with self.assertRaises(urllib.error.HTTPError) as error:self.request(path)
+            self.assertEqual(error.exception.code,400)
+
     def test_write_requires_token(self):
         with self.assertRaises(urllib.error.HTTPError) as e:
             self.request('/api/devices',{'name':'Test','ip':'192.168.1.90'})

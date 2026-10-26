@@ -436,7 +436,7 @@ def parse_voice(raw):
 def validate_payload(data, require_recent=True):
     """Strict allowlist at the local ingestion boundary."""
     required={'collected_at', 'metrics', 'interfaces', 'firmware'}
-    if not isinstance(data, dict) or not required <= set(data) or set(data)-required-{'system','wifi','stations','clients','wan_states','wan_packet_totals','inventory','voice','health','sections'}:
+    if not isinstance(data, dict) or not required <= set(data) or set(data)-required-{'system','wifi','stations','clients','wan_states','wan_packet_totals','inventory','voice','health','sections','observability'}:
         raise ValueError('Invalid telemetry payload')
     if data['firmware'] != FIRMWARE:
         raise ValueError('Unsupported firmware')
@@ -467,6 +467,9 @@ def validate_payload(data, require_recent=True):
         if key.startswith('lan') and (type(values['link_up']) is not bool or values['duplex'] not in (None,'full','half') or values['speed_mbps'] not in (None,10,100,1000,2500,10000)):
             raise ValueError('Invalid link')
     validate_extensions(data)
+    if 'observability' in data:
+        from app.router_observability import validate
+        validate(data['observability'])
     return data
 
 
@@ -548,10 +551,14 @@ class HuaweiB7:
         self.next_attempt = 0
         self.failures = 0
         self.cached = None
+        self.observation_cache = None
+        self.next_observation_attempt = 0
+        self.authentication_error = AuthenticationError
         self.lock = threading.Lock()
 
     def _request(self, connection, method, path, body=None, cookie=None):
-        allowed = set(PATHS.values()) | {'/', '/index.asp', '/asp/GetRandCount.asp', '/login.cgi'}
+        from app.router_observability import SOURCES
+        allowed = set(PATHS.values()) | {v[0] for v in SOURCES.values()} | {'/', '/index.asp', '/asp/GetRandCount.asp', '/login.cgi'}
         if path not in allowed or (method != 'GET' and (method != 'POST' or path not in ('/asp/GetRandCount.asp','/login.cgi'))):
             raise AdapterError('request_not_allowed')
         headers = {'Referer': 'http://'+self.host+'/', 'Content-Type':'application/x-www-form-urlencoded'}
@@ -686,10 +693,14 @@ class HuaweiB7:
                         if key in payload['interfaces']:payload['interfaces'][key].update({k:v for k,v in value.items() if k in EXTRA_COUNTERS})
                 else:payload[section]=parsed
                 payload['sections'][section]='ok'
+            except AuthenticationError:
+                raise
             except (AdapterError,OSError,http.client.HTTPException):
                 payload['sections'][section]='unavailable'
                 conn.close()
         payload['sections']['wifi']='ok' if payload['wifi'] else 'unavailable'
+        from app.router_observability import collect
+        payload['observability']=collect(self,conn)
         return payload
 
     def _failed(self, now):
@@ -754,7 +765,7 @@ def main():
             probe_worker.start()
         print(f'Dashboard: http://{args.bind}:{args.port} · token temporário apenas em memória')
         try:
-            run_collector(adapter,args.port,token,args.watch)
+            run_collector(adapter,args.port,token,args.watch,keep_serving_on_auth_error=True)
         finally:
             adapter.close()
             probe_stop.set()
@@ -769,7 +780,7 @@ def main():
         adapter.close()
 
 
-def run_collector(adapter, port, token, watch):
+def run_collector(adapter, port, token, watch, keep_serving_on_auth_error=False):
     from urllib.request import Request, build_opener, ProxyHandler
     opener = build_opener(ProxyHandler({}))
     from app.outbox import Outbox
@@ -785,6 +796,7 @@ def run_collector(adapter, port, token, watch):
             if response.status!=201:raise AdapterError('local_ingest_failed')
     while True:
         try:
+            core.set_collector_state('collecting',last_attempt=core.utcnow(),reason=None)
             # Recover acknowledged-or-pending samples before reading new device data.
             try:outbox.flush(deliver)
             except Exception:print('Envio anterior pendente na fila local; nova recolha será preservada.')
@@ -794,6 +806,7 @@ def run_collector(adapter, port, token, watch):
             host_telemetry.record_collection((time.perf_counter()-collection_started)*1000)
             outbox.enqueue(result)
             outbox.flush(deliver)
+            core.set_collector_state('ok',last_success=result['collected_at'],reason=None)
             audit=getattr(adapter,'audit',None)
             if audit:
                 try:audit.finish(result,port)
@@ -801,9 +814,15 @@ def run_collector(adapter, port, token, watch):
                     print('Auditoria indisponível; amostra já guardada. Consultar testes e relatório local.')
             print('Recolha guardada:',result['collected_at'],len(result['interfaces']),'interfaces · renovações:',adapter.renewals)
         except AuthenticationError:
+            core.set_collector_state('auth_blocked',reason='authentication_failed')
+            if keep_serving_on_auth_error and watch:
+                adapter.close()
+                print('Autenticação bloqueada; painel e histórico continuam disponíveis. Reinício manual necessário após verificar o acesso.')
+                while True:time.sleep(1)
             raise SystemExit('Autenticação falhou/expirou. Coletor parado; não repete credenciais automaticamente.') from None
         except Exception as exc:
             code = str(exc) if isinstance(exc,AdapterError) else 'local_ingest_unavailable'
+            core.set_collector_state('backoff',reason='collection_unavailable')
             print('Recolha indisponível:',code,'· sem atualização das métricas.')
             if not watch:
                 raise SystemExit(1) from None

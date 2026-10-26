@@ -25,6 +25,12 @@ INTERVAL = max(30, int(os.environ.get("FNO_INTERVAL", "60")))
 RETENTION_DAYS = max(0, int(os.environ.get("FNO_RETENTION_DAYS", "0")))
 WRITE_TOKEN = os.environ.get("FNO_INGEST_TOKEN", "")
 LOCK = threading.RLock()
+COLLECTOR_STATE={'state':'not_started','last_attempt':None,'last_success':None,'reason':None}
+
+
+def set_collector_state(state,**fields):
+    with LOCK:
+        COLLECTOR_STATE.update(state=state,**fields)
 
 ROUTER = {"model": "OptiXstar HG8247B7-8N", "vendor": "Huawei", "isp": None,
           "firmware": "V5R024C00S114", "hardware": None, "ip": ROUTER_IP,
@@ -105,6 +111,8 @@ def init_db():
         """)
         from .read_models import init_router
         init_router(db)
+        from .router_observability import init_db as init_observability
+        init_observability(db)
 
 
 def emit(db, severity, category, title, detail="", source="collector"):
@@ -237,6 +245,8 @@ def put_huawei_sample(data, historical=False):
             return
         sample_id=db.execute('INSERT INTO huawei_samples(ts,payload) VALUES(?,?)',
                    (data['collected_at'], json.dumps(data, allow_nan=False))).lastrowid
+        from .router_observability import persist
+        persist(db,data.get('observability',{}),historical=historical)
         from .read_models import project_overview, project_client, safe_project
         safe_project(db,project_overview,sample_id,data['collected_at'],data)
         for client in data.get('clients',[]):
@@ -264,6 +274,8 @@ def prune_history(db):
     cutoff=datetime.fromtimestamp(time.time()-RETENTION_DAYS*86400,tz=timezone.utc).isoformat(timespec='seconds')
     for table in ARCHIVE_TABLES.values():
         db.execute(f'DELETE FROM {table} WHERE ts < ?',(cutoff,))
+    db.execute('DELETE FROM router_observations WHERE ts < ?',(cutoff,))
+    db.execute('DELETE FROM router_changes WHERE observed_at < ?',(cutoff,))
 
 
 def get_archive(kind='huawei',after=0,limit=1000):
@@ -335,6 +347,8 @@ def latest_huawei(db):
         return {'source': 'huawei-b7-http', 'quality': 'unavailable', 'collected_at': None,
                 'metrics': {}, 'interfaces': {}}
     result = json.loads(row['payload'])
+    # Additional sources have their own cadence/API; keep the baseline status small.
+    result.pop('observability',None)
     age = (datetime.now(timezone.utc)-datetime.fromisoformat(row['ts'])).total_seconds()
     result.update(source='huawei-b7-http', age_seconds=max(0, int(age)),
                   quality='ok' if -5 <= age <= 180 else 'stale')
@@ -355,6 +369,7 @@ def get_status():
         return {"router": ROUTER, "probe": dict(last) if last else None,
                 "metrics": latest_router(db), "devices": list_devices(db),
                 "huawei": latest_huawei(db),
+                "collector": dict(COLLECTOR_STATE),
                 "event_count": counts, "server_time": utcnow(),
                 "poll_interval_seconds": INTERVAL, "retention_days": RETENTION_DAYS, "retention_unlimited": RETENTION_DAYS==0,
                 "recording": {"pending_samples":sum(1 for _ in (DB_PATH.parent/"outbox").glob("*.json")),"durable_queue":True},

@@ -180,6 +180,23 @@ class Handler(BaseHTTPRequestHandler):
                 try:return self.respond(200,device_history(parts[3],period))
                 except LookupError:return self.error_json(404,'Device not found')
             if path.path == "/api/status": return self.respond(200, core.get_status())
+            if path.path == '/api/router/observability':
+                from .router_observability import read
+                hours=float(parse_qs(path.query).get('hours',[24])[0])
+                with core.LOCK,core.connect() as db:
+                    result=read(db,hours)
+                return self.respond(200,result)
+            if path.path == '/api/router/observability/archive':
+                from .router_observability import archive
+                query=parse_qs(path.query)
+                with core.LOCK,core.connect() as db:
+                    result=archive(db,query.get('source',[''])[0],query.get('after',[0])[0],query.get('limit',[100])[0])
+                return self.respond(200,result)
+            if path.path == '/api/router/observability/change':
+                from .router_observability import read_change
+                with core.LOCK,core.connect() as db:
+                    result=read_change(db,parse_qs(path.query).get('id',[0])[0])
+                return self.respond(200,result) if result else self.error_json(404,'Change not found')
             if path.path == '/api/archive':
                 query=parse_qs(path.query)
                 return self.respond(200,core.get_archive(query.get('kind',['huawei'])[0],

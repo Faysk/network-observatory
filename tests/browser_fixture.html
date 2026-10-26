@@ -11,6 +11,18 @@
   await wait(()=>frame.contentDocument?.getElementById('modeToggle'),'shell');
   const d=frame.contentDocument,w=frame.contentWindow;
   await wait(()=>w.FNO?.state?.resources?.status?.phase==='ready','first status');
+  await wait(()=>d.querySelectorAll('.observation-source').length===3,'additional source panel');
+  d.querySelector('a[href="#routerObservability"]').click();await wait(()=>w.location.hash==='#routerObservability','source navigation anchor');
+  assert(d.querySelector('.observation-collector').textContent.includes('Autenticação bloqueada'),'collector authentication state missing');
+  const source=d.querySelector('.observation-source');source.open=true;
+  assert(source.textContent.includes('Auto. 20/40/80 MHz'),'configured width was not decoded');
+  assert(source.textContent.includes('<img src=x onerror=alert(1)>')&&!source.querySelector('img'),'source label was interpreted as HTML');
+  source.querySelector('button').click();await wait(()=>source.textContent.includes('Primeiras 1 observações'),'observation archive');
+  const change=[...d.querySelectorAll('#routerObservability button')].find(n=>n.textContent==='Comparar leituras');
+  change.closest('details').open=true;change.click();await wait(()=>change.parentElement.textContent.includes('1234'),'before/after comparison');
+  frame.style.width='320px';await sleep(100);
+  assert(d.documentElement.scrollWidth<=d.documentElement.clientWidth+2,'mobile page overflows '+d.documentElement.scrollWidth+'/'+d.documentElement.clientWidth+' '+[...d.querySelectorAll('body *')].filter(n=>n.getBoundingClientRect().right>d.documentElement.clientWidth+2&&!n.closest('.observation-table')).slice(0,8).map(n=>n.tagName+'.'+n.className).join(', '));
+  frame.style.width='1300px';
   assert(d.querySelector('[data-metric="cpu"]').textContent.trim()==='0','real zero CPU lost');
   assert(['loading','error'].includes(w.FNO.state.resources.overview.phase),'status not independently available from summary');
   assert(d.querySelector('.metric-card[data-detail=router]').getAttribute('aria-busy')==='false','CPU card still busy after status');

@@ -39,7 +39,7 @@ class AuditTests(unittest.TestCase):
         self.assertEqual(payload['wifi']['wlan1']['tx_drops'],2003)
         self.assertEqual(payload['wifi']['wlan1']['rx_drops'],2004)
         for path,value in audit.leaves(payload):
-            if path.startswith('sections') or path=='collected_at' or isinstance(value,(dict,list)):continue
+            if path.startswith(('sections','observability')) or path=='collected_at' or isinstance(value,(dict,list)):continue
             broken=json.loads(json.dumps(payload));tokens=re.findall(r'[^.\[\]]+',path);node=broken
             for token in tokens[:-1]:node=node[int(token)] if isinstance(node,list) else node[token]
             token=int(tokens[-1]) if isinstance(node,list) else tokens[-1]
