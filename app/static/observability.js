@@ -388,7 +388,8 @@ function updateCategoryNav(){
 }
 function renderCategoryNav(data){
  categoryNav.replaceChildren();
- const view=VM.sections(data.sources);
+ const available=new Map(VM.sections(data.sources).map(x=>[x.id,x]));
+ const view=VM.SECTIONS.map(x=>available.get(x.id)||{...x,sources:[]});
  const options=[
     {id:'all',title:'Todas',subtitle:'Panorama',total:data.sources.length,current:data.sources.filter(s=>s.quality==='ok').length},
     ...view.map(v=>({id:v.id,title:({wifi:'Wi-Fi',clients:'Dispositivos',policies:'Regras',network:'Rede e IPv6',services:'Serviços'})[v.id]||v.title,
@@ -397,6 +398,7 @@ function renderCategoryNav(data){
  for(const option of options){
    const button=node('button',undefined,'observation-category-card');button.type='button';
    button.dataset.observationCategory=option.id;
+   if(!option.total){button.disabled=true;button.title='Sem fontes deste grupo na resposta atual';}
    button.setAttribute('aria-label',option.title+' · '+option.current+' de '+option.total+' fontes atuais');
    const top=node('span',undefined,'observation-category-top');
    top.append(node('strong',option.title),node('span',option.current+'/'+option.total,'observation-category-total'));
@@ -404,7 +406,7 @@ function renderCategoryNav(data){
    const fill=node('span',undefined,'observation-category-meter-fill');
    fill.style.width=(option.total?option.current/option.total*100:0).toFixed(1)+'%';
    meter.append(fill);
-   button.append(top,meter,node('small',option.current===option.total?'Todas com leitura atual':option.total-option.current+' sem leitura atual'));
+   button.append(top,meter,node('small',!option.total?'Nenhuma fonte recebida':option.current===option.total?'Todas com leitura atual':option.total-option.current+' sem leitura atual'));
    button.addEventListener('click',()=>{
      group.value=option.id;search.value='';quickMode='all';
      for(const el of quickbar.querySelectorAll('[data-quick]'))el.setAttribute('aria-pressed',String(el.dataset.quick==='all'));
