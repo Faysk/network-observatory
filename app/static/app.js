@@ -298,7 +298,7 @@ async function loadSheet(){
  abortSheet();
  const request=++state.request,metric=state.metric,period=state.period;
  const controller=new AbortController();activeSheetAbort=controller;
- state.bundle=null;updateSheetMeta();
+ state.bundle=null;updateSheetMeta();$('#historyChart').dataset.phase='loading';
  $('#historyChart').setAttribute('aria-busy','true');
  $('#exportCsv').disabled=true;$('#detailStats').replaceChildren();
  $('#analysisRows').replaceChildren();$('#detailEvents').replaceChildren();
