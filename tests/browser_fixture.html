@@ -14,13 +14,14 @@
   assert(d.querySelector('[data-metric="cpu"]').textContent.trim()==='0','real zero CPU lost');
   assert(['loading','error'].includes(w.FNO.state.resources.overview.phase),'status not independently available from summary');
   assert(d.querySelector('.metric-card[data-detail=router]').getAttribute('aria-busy')==='false','CPU card still busy after status');
-  assert(d.querySelector('.hero-score').getAttribute('aria-busy')==='true','Coverage block missing independent loading');
+  assert(d.querySelector('.hero-score').getAttribute('aria-busy')===String(w.FNO.state.resources.overview.phase==='loading'),'Coverage block state differs from its own resource');
   notes.push('status visible before history');
   await wait(()=>w.FNO.state.resources.overview.phase==='error','summary HTTP500');
   assert(w.FNO.state.api===true,'history error incorrectly marked server offline');
   assert(d.querySelector('#overviewState [data-retry-resource="overview"]'),'missing local retry');
   notes.push('history error isolated');
   d.querySelector('#overviewState [data-retry-resource="overview"]').click();
+  assert(d.querySelector('.hero-score').getAttribute('aria-busy')==='true','Coverage retry missing immediate loading');
   await wait(()=>w.FNO.state.resources.overview.phase==='ready','overview retry');
   assert(w.FNO.state.overview.summary.sampled===true,'home requested full expensive history');
   assert(d.querySelector('#overviewChart svg'),'summary chart not drawn');
