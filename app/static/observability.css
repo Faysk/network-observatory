@@ -10,7 +10,7 @@
 .observation-panel button:disabled{opacity:.6;cursor:wait}
 .observation-panel :focus-visible{outline:2px solid #cfb1ff;outline-offset:3px}
 .observation-toolbar{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0 8px}
-.observation-toolbar button,.observation-toolbar select,.observation-source-actions button,.observation-change button,
+.observation-toolbar button,.observation-toolbar select,.observation-toolbar input,.observation-source-actions button,.observation-change button,
 .observation-panel .observation-archive button{color:#e9dbf4;background:#2a2036;border:1px solid #5c4b6c;border-radius:10px;padding:10px 13px;min-height:44px;max-width:100%}
 .observation-toolbar button:hover,.observation-source-actions button:hover,.observation-change button:hover{border-color:#ba8ad7;background:#332441}
 .observation-collector{border-left:3px solid #ab8cdb;padding:0 0 0 12px;font-size:.86rem;color:#c8bed3}
@@ -124,3 +124,22 @@
 }
 @media(max-width:360px){.observation-overview{grid-template-columns:1fr}.observation-toolbar{grid-template-columns:1fr}}
 @media(prefers-reduced-motion:reduce){.observation-source{transition:none}}
+
+/* Context-first detail cards for each reported record; wide raw tables remain optional. */
+.observation-source-search{flex:1 1 200px;min-width:170px;color:#f3e3fa;background:#21182b;border:1px solid #574265;
+ border-radius:10px;padding:11px 13px;min-height:44px}
+.observation-source-search::placeholder{color:#a99bb8}
+.observation-search-empty{padding:24px;border:1px dashed #5c486d;border-radius:13px;text-align:center;color:#d0bddf}
+.observation-record-preview{grid-column:1/-1;min-width:0;padding:14px 16px;border:1px solid #44344f;border-radius:14px;background:#1a1424}
+.observation-record-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,225px),1fr));gap:9px}
+.observation-record-card{min-width:0;padding:13px;border-radius:11px;background:#281e33;border:1px solid #42344e}
+.observation-record-title{font-size:.81rem;display:block;overflow-wrap:anywhere;color:#f3defe;margin-bottom:9px}
+.observation-record-fields{display:grid;grid-template-columns:minmax(80px,1fr) minmax(0,1.3fr);column-gap:7px;row-gap:5px;
+ margin:0;font-size:.7rem}
+.observation-record-fields dt{color:#ae9cbf;overflow-wrap:anywhere}
+.observation-record-fields dd{margin:0;color:#e8dbea;text-align:right;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.observation-record-preview>small{display:block;margin-top:12px;color:#b6a5c7}
+@media(max-width:540px){.observation-record-preview{padding:10px}.observation-record-grid{grid-template-columns:1fr 1fr;gap:6px}
+ .observation-record-card{padding:10px}.observation-record-fields{grid-template-columns:1fr}.observation-record-fields dd{text-align:left;margin-bottom:4px}
+ .observation-source-search{grid-column:1/-1;width:100%}}
+@media(max-width:400px){.observation-record-grid{grid-template-columns:1fr}}
