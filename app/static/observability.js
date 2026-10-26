@@ -16,6 +16,9 @@ const refresh=node('button','Atualizar painel'),download=node('button','Exportar
 const notice=node('p','','observation-notice');notice.setAttribute('role','status');panel.append(notice);
 const summaryGrid=node('div',undefined,'observation-overview');panel.append(summaryGrid);
 const viewNote=node('p','Selecione uma fonte para inspecionar os dados. Os indicadores mostram valores reportados; não classificam automaticamente a segurança da rede.','observation-reading-note');panel.append(viewNote);
+const categoryNav=node('nav',undefined,'observation-category-nav');
+categoryNav.setAttribute('aria-label','Explorar áreas de diagnóstico');
+panel.append(categoryNav);
 const quickbar=node('div',undefined,'observation-quickfilters');
 quickbar.setAttribute('role','group');quickbar.setAttribute('aria-label','Filtrar por situação');
 const quickOptions=[['all','Todas'],['changed','Com alterações'],['missing','Sem leitura atual']];
@@ -45,7 +48,7 @@ Object.assign(labels,{pmf_policy_reported:'Política PMF reportada',wifi_mode_re
 const groups={wifi:['radio_settings','guest_limits','guest_network','wps','wifi_features','radios','wifi_backhaul','station_details'],clients:['dhcp','client_details','client_addresses','client_modes'],network:['ipv6','lan_settings','ipv6_lan','topology','wan_nat'],policies:['upnp','firewall_v4','firewall_v6','wan_acl','band_steering','wifi_schedule','mac_policy'],services:['usb_voice','file_services','dlna','voice_schedule']};
 let payload=null,busy=false,pendingReload=false;
 Object.assign(labels,{conflicting_fields:'Campos divergentes entre linhas reportadas',reported_rows:'Linhas reportadas para este MAC'});
-group.addEventListener('change',applyFilters);
+group.addEventListener('change',()=>{applyFilters();updateCategoryNav();});
 search.addEventListener('input',applyFilters);
 document.querySelector('a[href="#routerObservability"]')?.addEventListener('click',()=>{document.getElementById('sidebar')?.classList.remove('open');});
 const time=v=>v?new Date(v).toLocaleString('pt-PT'):'Sem leitura';
@@ -377,7 +380,43 @@ function applyFilters(){
    empty.hidden=false;
  }else if(empty)empty.hidden=true;
 }
+function updateCategoryNav(){
+ for(const button of categoryNav.querySelectorAll('[data-observation-category]')){
+   const selected=button.dataset.observationCategory===group.value;
+   button.setAttribute('aria-pressed',String(selected));
+ }
+}
+function renderCategoryNav(data){
+ categoryNav.replaceChildren();
+ const view=VM.sections(data.sources);
+ const options=[
+    {id:'all',title:'Todas',subtitle:'Panorama',total:data.sources.length,current:data.sources.filter(s=>s.quality==='ok').length},
+    ...view.map(v=>({id:v.id,title:({wifi:'Wi-Fi',clients:'Dispositivos',policies:'Regras',network:'Rede e IPv6',services:'Serviços'})[v.id]||v.title,
+       subtitle:v.title,total:v.sources.length,current:v.sources.filter(s=>s.quality==='ok').length}))
+ ];
+ for(const option of options){
+   const button=node('button',undefined,'observation-category-card');button.type='button';
+   button.dataset.observationCategory=option.id;
+   button.setAttribute('aria-label',option.title+' · '+option.current+' de '+option.total+' fontes atuais');
+   const top=node('span',undefined,'observation-category-top');
+   top.append(node('strong',option.title),node('span',option.current+'/'+option.total,'observation-category-total'));
+   const meter=node('span',undefined,'observation-category-meter');
+   const fill=node('span',undefined,'observation-category-meter-fill');
+   fill.style.width=(option.total?option.current/option.total*100:0).toFixed(1)+'%';
+   meter.append(fill);
+   button.append(top,meter,node('small',option.current===option.total?'Todas com leitura atual':option.total-option.current+' sem leitura atual'));
+   button.addEventListener('click',()=>{
+     group.value=option.id;search.value='';quickMode='all';
+     for(const el of quickbar.querySelectorAll('[data-quick]'))el.setAttribute('aria-pressed',String(el.dataset.quick==='all'));
+     applyFilters();updateCategoryNav();
+     cards.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'});
+   });
+   categoryNav.append(button);
+ }
+ updateCategoryNav();
+}
 function renderSummary(data){
+ renderCategoryNav(data);
  summaryGrid.replaceChildren();
  const x=VM.summary(data.sources,data.changes);
  for(const [label,value,help] of [
