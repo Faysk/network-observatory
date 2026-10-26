@@ -10,6 +10,7 @@ from datetime import datetime, timezone, timedelta
 from . import request_timing
 from .metric_math import observation_coverage
 from . import core, read_models
+from .wifi_links import band_rssi, station_links
 from .query_cache import QueryCache
 
 PERIODS={'1h':3600,'6h':21600,'12h':43200,'24h':86400,'7d':604800,'1m':2592000,'1y':31536000}
@@ -30,11 +31,13 @@ def sample(ts,payload):
     stations=payload.get('stations',[])
     # Multiple rows are observations, not separate clients; no aggregate traffic is attributed.
     station=stations[0] if stations else {}
+    links=payload.get('wifi_links')
+    links=links if isinstance(links,list) and links else station_links(stations,{})
     return {'timestamp':ts,'online':{'Online':True,'Offline':False}.get(payload.get('reported_status')),
             'rssi_dbm':station.get('rssi_dbm'),'snr_db':station.get('snr_db_reported'),
             'link_rx_phy_mbps':station.get('rx_link_mbps'),'link_tx_phy_mbps':station.get('tx_link_mbps'),
             'download_mbps':None,'upload_mbps':None,'latency_lan_ms':None,
-            'interface':station.get('interface'),'ips':payload.get('ips',[]),
+            'interface':station.get('interface'),'wifi_links':links,'ips':payload.get('ips',[]),
             'source':SOURCE,'quality':'reported','confidence':'reported',
             'measurement_semantics':'AP-reported RSSI and PHY; not Internet throughput'}
 
@@ -99,6 +102,7 @@ def _device_history_uncached(identifier,period='24h'):
     keys=('rssi_dbm','snr_db','link_rx_phy_mbps','link_tx_phy_mbps','download_mbps','upload_mbps','latency_lan_ms','presence')
     buckets=Buckets(start,end,keys);online=0;known=0;segments=deque(maxlen=500);segment=None;previous=None;gap_count=0;latest=None
     identities=deque(maxlen=500);previous_identity=None;identity_count=0;segment_count=0;observed_duration=0
+    wifi_history=deque(maxlen=500);wifi_change_count=0;previous_wifi=None
     def close_segment(item):
         nonlocal segment_count,observed_duration
         item['observed_duration_seconds']=max(0,stamp(item['last_observed_at'])-stamp(item['started_at']))
@@ -111,6 +115,13 @@ def _device_history_uncached(identifier,period='24h'):
         first=db.execute('SELECT MIN(ts) FROM router_client_samples WHERE mac=?',(mac,)).fetchone()[0]
         for row in read_models.device_rows(db,mac,start.isoformat(),end.isoformat()):
             payload=json.loads(row['payload']);point=sample(row['ts'],payload);latest=point
+            if point['online'] is True and point['wifi_links']:
+                association=tuple((v.get('interface'),v.get('band'),v.get('channel')) for v in point['wifi_links'])
+                if association!=previous_wifi:
+                    wifi_change_count+=1
+                    wifi_history.append({'observed_at':row['ts'],'links':point['wifi_links'],
+                                         'semantics':'observed_wifi_interface_not_exact_roam_time'})
+                    previous_wifi=association
             identity_key=tuple(tuple(payload.get(k,[])) for k in ('names','ips','ports'))
             if identity_key!=previous_identity:
                 identities.append({'collected_at':row['ts'],**{k:payload.get(k,[]) for k in ('names','ips','ports')}});identity_count+=1;previous_identity=identity_key
@@ -136,6 +147,7 @@ def _device_history_uncached(identifier,period='24h'):
             'sample_coverage':coverage,
             'measurement_semantics':{'presence':'estimated from reported states, not exact sessions','rssi_dbm':'AP-reported dBm','phy':'router RX/TX PHY in Mbit/s, not throughput','traffic':'unavailable'},
             'series':points,'stats':stats,'latest':latest,'sessions':list(segments),'session_count':segment_count,'sessions_truncated':segment_count>500,'identity_history':list(identities),'identity_history_truncated':identity_count>500,
+            'wifi_history':list(wifi_history),'wifi_history_truncated':wifi_change_count>500,
             'presence':{'online_samples':online,'known_samples':known,'percent_of_known_samples':online/known*100 if known else None,
                         'observed_duration_seconds':observed_duration,'semantics':'estimated_contiguous_sample_spans_with_max_gap_180s; not exact association sessions'},
             'events':events[:1000],'events_truncated':len(events)>1000,
@@ -157,7 +169,7 @@ def device_history(identifier,period='24h'):
 
 def _overview_history_uncached(period='24h'):
     start,end=window(period)
-    keys=('cpu_pct','memory_pct','optical_rx_dbm','optical_tx_dbm','wan_rx_bytes','wan_tx_bytes','online_clients','rssi_dbm')
+    keys=('cpu_pct','memory_pct','optical_rx_dbm','optical_tx_dbm','wan_rx_bytes','wan_tx_bytes','online_clients','rssi_dbm','rssi_24_dbm','rssi_5_dbm')
     counters=CounterPreview(start,end)
     buckets=Buckets(start,end,keys);probes=Buckets(start,end,('router_ms','internet_ms','router_online','internet_online'))
     with core.connect() as db:
@@ -174,7 +186,7 @@ def _overview_history_uncached(period='24h'):
             'probes':probe_points,'probe_stats':probe_stats,'events':events[:1000],'events_truncated':len(events)>1000,
             'source':SOURCE,'source_type':'router_gui_readonly','confidence':'reported','collected_at':points[-1]['timestamp_end'] if points else None,
             'sample_coverage':coverage,
-            'measurement_semantics':{'wan':'raw router counters; width/reset not validated; no throughput or consumption derived','wifi':'arithmetic RSSI mean of stations reported in each sample'},
+            'measurement_semantics':{'wan':'raw router counters; width/reset not validated; no throughput or consumption derived','wifi':'arithmetic RSSI mean of stations reported in each sample; per-band average requires matching station/radio interface'},
             'quality':{**coverage,'aggregation':'bucket_mean_with_min_max_envelope'}}
 
 
@@ -230,6 +242,7 @@ def overview_summary(period='24h'):
                     p['online_clients']=sum(c.get('reported_status')=='Online' for c in payload['clients'])
                 signals=[v['rssi_dbm'] for v in payload.get('stations',[]) if v.get('rssi_dbm') is not None]
                 p['rssi_dbm']=sum(signals)/len(signals) if signals else None
+                p.update(band_rssi(payload))
                 series.append(p)
         probe_ids=[row[0] for row in db.execute(
             "SELECT MAX(id) FROM samples WHERE ts>=? AND ts<=? "
