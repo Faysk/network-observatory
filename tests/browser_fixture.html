@@ -28,7 +28,7 @@
          'passive observed change should be rendered');
   const operationsHistory=d.querySelector('.observation-operations-trend');
   operationsHistory.open=true;
-  assert(operationsHistory.querySelector('.observation-trend-svg'),'historical system health chart missing');
+  await wait(()=>operationsHistory.querySelector('.observation-trend-svg'),'historical system health chart');
   assert(d.querySelectorAll('.observation-kpi').length===4,'four overview metrics missing');
   assert(d.querySelectorAll('.observation-section').length>=2,'source thematic grouping missing');
   const search=d.querySelector('.observation-source-search');
