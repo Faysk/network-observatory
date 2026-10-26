@@ -1,6 +1,6 @@
 {
   "repository": "Faysk/s7-edge-observatory",
-  "source_commit": "d7e10f6d380a63816765b2d55bbebc4762fba97a",
+  "source_commit": "341c98ca6df5b1c47d4b6ca4ab5c5acb9e293df2",
   "normalization": "UTF-8 bytes with CRLF normalized to LF",
   "sha256": {
     "js/app.js": "cf60a87415c49282c2e85d8461be18f9e1f19b1fdac683472e420dda7fde8c4f",

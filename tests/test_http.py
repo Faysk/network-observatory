@@ -41,6 +41,16 @@ class HttpTests(unittest.TestCase):
         req=urllib.request.Request(self.url+path,data=encoded,headers=headers)
         with urllib.request.urlopen(req,timeout=HTTP_TIMEOUT) as res:return res.status,res.read(),dict(res.headers)
 
+    def test_absolute_request_target_is_not_a_proxy(self):
+        import http.client
+        conn=http.client.HTTPConnection('127.0.0.1',self.srv.server_address[1],timeout=HTTP_TIMEOUT)
+        try:
+            conn.request('GET','http://example.invalid/router/')
+            res=conn.getresponse()
+            self.assertEqual(res.status,403)
+            self.assertIn(b'Proxy requests are not supported',res.read())
+        finally:conn.close()
+
     def test_api_timing_and_gzip_preserve_contract(self):
         import gzip
         fixture={'clients':[{'name':'synthetic repeated value','value':0} for _ in range(1500)]}
