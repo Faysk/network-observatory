@@ -143,3 +143,63 @@
  .observation-record-card{padding:10px}.observation-record-fields{grid-template-columns:1fr}.observation-record-fields dd{text-align:left;margin-bottom:4px}
  .observation-source-search{grid-column:1/-1;width:100%}}
 @media(max-width:400px){.observation-record-grid{grid-template-columns:1fr}}
+
+/* Phase 2 — guided investigation, genuinely historical plots and resilient state. */
+#routerObservability [hidden]{display:none!important}
+.observation-panel{position:relative;isolation:isolate;box-shadow:0 24px 70px rgba(5,4,13,.15)}
+.observation-panel::before{content:'';position:absolute;inset:0 0 auto;height:160px;border-radius:20px 20px 0 0;
+ background:radial-gradient(ellipse at 14% -20%,rgba(184,117,241,.10),transparent 55%),radial-gradient(ellipse at 86% 10%,rgba(77,155,197,.08),transparent 52%);pointer-events:none;z-index:-1}
+.observation-panel h2{font-weight:775;letter-spacing:-.04em}
+.observation-panel>p:first-of-type{max-width:82ch;color:#c0b1d0;font-size:.87rem}
+.observation-quickfilters{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:3px 0 25px;padding:11px 13px;
+ border:1px solid #3e324b;background:#1b1624;border-radius:14px}
+.observation-filter-chip{min-height:37px;padding:8px 14px!important;border-radius:22px!important;font-size:.75rem!important;
+ background:transparent!important;color:#c5b5d3!important;border:1px solid transparent!important;transition:background .14s,border-color .14s,color .14s}
+.observation-filter-chip:hover{color:#f9edff!important;background:#2c203b!important}
+.observation-filter-chip[aria-pressed="true"]{color:#f8e9ff!important;background:#3e294e!important;border-color:#77598a!important;
+ box-shadow:inset 0 0 0 1px rgba(222,183,246,.05)}
+.observation-match-count{margin-left:auto;font-size:.72rem;color:#b6a4c6;white-space:nowrap;font-variant-numeric:tabular-nums}
+.observation-source-summary{position:relative;gap:14px}
+.observation-source-summary::after{content:'';position:absolute;left:0;bottom:0;width:0;height:2px;border-radius:2px;
+ background:linear-gradient(90deg,#a688d3,#69c3b8);transition:width .18s}
+.observation-source:hover>.observation-source-summary::after,.observation-source[open]>.observation-source-summary::after{width:100%}
+.observation-source[open]>.observation-source-summary{border-bottom:1px solid rgba(150,120,171,.18)}
+.observation-source-content{border-top:0}
+.observation-source[open]{box-shadow:0 17px 50px rgba(0,0,0,.21),inset 0 1px rgba(238,208,255,.025)}
+.observation-source-summary>.observation-source-flags{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:5px}
+.observation-source-summary:before{width:23px;height:23px;line-height:23px;text-align:center;background:#392841;border-radius:8px}
+.observation-quick>.observation-metric{box-shadow:inset 0 1px rgba(255,255,255,.025)}
+.observation-source-actions{margin-top:17px;border-top:1px solid #40334e;padding-top:13px}
+.observation-source-actions button:first-child{background:linear-gradient(110deg,#563c6a,#3f335f);border-color:#9870b6;font-weight:675}
+.observation-source-actions button:first-child:hover{background:linear-gradient(110deg,#65467d,#514074)}
+.observation-trend{min-width:0;margin:16px 0 18px;border:1px solid #4c3a5e;border-radius:15px;
+ background:linear-gradient(160deg,#181d2e,#1a1627 70%);overflow:hidden}
+.observation-trend-inner{padding:20px}
+.observation-trend-header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:6px;flex-wrap:wrap}
+.observation-trend-header h4{font-size:1.05rem;letter-spacing:-.02em}
+.observation-trend-message{color:#beb1cd;font-size:.78rem;margin:8px 0}
+.observation-trend-range{font-size:.76rem;color:#9fb9ce}
+.observation-trend-select{display:flex;flex-direction:column;gap:7px;font-size:.75rem;color:#cbb9da;margin:14px 0 12px;max-width:350px}
+.observation-trend-select select{width:100%;color:#e7d8f3;border:1px solid #5f506c;border-radius:9px;
+ background:#292238;padding:9px 12px;min-height:40px}
+.observation-trend-visual{padding:12px 6px 4px;min-width:0;border:1px solid #323f55;border-radius:12px;background:#131b2a}
+.observation-trend-visual>p{color:#b2a9c5;font-size:.78rem;padding:10px 14px}
+.observation-trend-svg{width:100%;height:auto;display:block;min-height:130px;max-height:320px;overflow:visible}
+.observation-trend-gridline{stroke:#3e516b;stroke-width:1;stroke-dasharray:3 7}
+.observation-trend-axis{fill:#a9b6ca;font-size:12px;font-variant-numeric:tabular-nums}
+.observation-trend-line{stroke:#bfa0f2;stroke-width:2.65;stroke-linejoin:round;stroke-linecap:round;
+ vector-effect:non-scaling-stroke}
+.observation-trend-dot{fill:#7ce4d5;stroke:#1a2031;stroke-width:1.1}
+.observation-trend-caption{margin:0 0 4px!important;text-align:center;color:#aab4c4!important;font-size:.73rem!important}
+.observation-trend-empty{color:#acafc3;font-size:.81rem}
+.observation-archive-entry>summary{list-style:disc}
+@media(max-width:700px){
+ .observation-trend-inner{padding:14px}
+ .observation-quickfilters{padding:9px;gap:5px}
+ .observation-filter-chip{padding:8px 10px!important}
+ .observation-match-count{width:100%;margin:4px 0 0 3px}
+ .observation-trend-svg{max-height:280px}
+}
+@media(prefers-reduced-motion:reduce){
+ .observation-filter-chip,.observation-source-summary::after{transition:none}
+}
