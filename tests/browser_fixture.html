@@ -13,6 +13,8 @@
   await wait(()=>w.FNO?.state?.resources?.status?.phase==='ready','first status');
   assert(d.querySelector('[data-metric="cpu"]').textContent.trim()==='0','real zero CPU lost');
   assert(['loading','error'].includes(w.FNO.state.resources.overview.phase),'status not independently available from summary');
+  assert(d.querySelector('.metric-card[data-detail=router]').getAttribute('aria-busy')==='false','CPU card still busy after status');
+  assert(d.querySelector('.hero-score').getAttribute('aria-busy')==='true','Coverage block missing independent loading');
   notes.push('status visible before history');
   await wait(()=>w.FNO.state.resources.overview.phase==='error','summary HTTP500');
   assert(w.FNO.state.api===true,'history error incorrectly marked server offline');
@@ -22,6 +24,9 @@
   await wait(()=>w.FNO.state.resources.overview.phase==='ready','overview retry');
   assert(w.FNO.state.overview.summary.sampled===true,'home requested full expensive history');
   assert(d.querySelector('#overviewChart svg'),'summary chart not drawn');
+  assert([...d.querySelectorAll('#overviewChart .history-series-line')].every(p=>p.getAttribute('d').includes('L')),'Preview incorrectly shown as disconnected points');
+  assert(d.querySelector('.hero-score').getAttribute('aria-busy')==='false','Coverage block stuck busy');
+  assert(d.querySelector('.hero-score > .block-load-status').hidden,'Loading badge remained after response');
   assert(w.FNO.state.resources.inventory.phase==='empty','valid empty inventory misclassified');
   notes.push('summary retry and [] inventory');
   const trigger=d.querySelector('.nav-item[data-detail="latency"]');

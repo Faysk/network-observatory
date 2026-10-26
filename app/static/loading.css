@@ -16,3 +16,15 @@ body[data-motion="off"] .load-placeholder::after{animation:none}
 
 .history-state.history-loading{height:auto;min-height:32px;flex-direction:row;justify-content:flex-start;gap:8px}
 body[data-initial-loading="true"] .metric-value strong{color:transparent;display:inline-block;min-width:70px;border-radius:6px;background:rgba(180,160,200,.12)}
+
+/* Resource-level progress preserves previously loaded values. */
+.resource-block{position:relative}
+.block-load-status{position:absolute;right:12px;bottom:5px;font-size:10px;line-height:16px;color:var(--muted,#c1adc9);pointer-events:none}
+.block-load-status[hidden]{display:none}
+.resource-block[data-load-phase="loading"]::after{content:"";position:absolute;left:12px;right:12px;top:0;height:2px;border-radius:2px;background:linear-gradient(90deg,transparent,#c3a4ff,transparent);transform-origin:left;animation:block-progress 1.3s ease-in-out 8;pointer-events:none}
+.resource-block[data-first-load="true"] .metric-value strong{color:transparent;min-width:64px;border-radius:5px;background:rgba(180,160,200,.14)}
+.hero-main>.block-load-status,.traffic-summary-values>.block-load-status,.signal-foot>.block-load-status{bottom:-15px}
+.resource-block[data-load-phase="stale"]>.block-load-status,.resource-block[data-load-phase="error"]>.block-load-status{color:#efbc91}
+@keyframes block-progress{0%,100%{opacity:.3;transform:scaleX(.3)}50%{opacity:1;transform:scaleX(1)}}
+@media(prefers-reduced-motion:reduce){.resource-block[data-load-phase="loading"]::after{animation:none}}
+body.motion-paused .resource-block::after{animation:none!important}

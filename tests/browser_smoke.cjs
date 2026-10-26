@@ -10,7 +10,7 @@ const fixtureClients=()=>Array.from({length:1000},(_,i)=>({mac:'02:00:00:'+i.toS
 const stamp=new Date().toISOString(),now=Date.now();
 const full=(period)=>({
  period:{key:period,from:new Date(now-86400000).toISOString(),to:stamp,resolution_seconds:600},
- series:[{timestamp:new Date(now-120000).toISOString(),timestamp_end:new Date(now-120000).toISOString(),sample_count:1,max_gap_seconds:0,cpu_pct:0,wan_rx_bytes:1000,wan_tx_bytes:0}],
+ series:Array.from({length:3},(_,i)=>({timestamp:new Date(now-(3-i)*600000).toISOString(),timestamp_end:new Date(now-(3-i)*600000).toISOString(),sample_count:1,max_gap_seconds:0,cpu_pct:0,wan_rx_bytes:1000+i,wan_tx_bytes:0})),
  probes:[{timestamp:new Date(now-120000).toISOString(),timestamp_end:new Date(now-120000).toISOString(),sample_count:1,max_gap_seconds:0,router_ms:0,internet_ms:null}],
  stats:{cpu_pct:{min:0,max:0,avg:0,sample_count:1}},probe_stats:{router_ms:{min:0,max:0,avg:0,sample_count:1}},
  events:[],quality:{coverage_percent:1,sample_count:1,expected_count:1440}
