@@ -48,7 +48,7 @@ def parse_allowed_hosts(raw):
     for item in (part.strip().lower().rstrip('.') for part in (raw or '').split(',')):
         if not item:continue
         if len(result)>=16 or len(item)>253 or not re.fullmatch(
-                r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*',item):
+                r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*',item):
             raise ValueError('Invalid FNO_ALLOWED_HOSTS entry')
         if item not in ('localhost',) and item.replace('.','').isdigit():
             raise ValueError('IP literals must not be listed as hostnames')
