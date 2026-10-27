@@ -46,6 +46,28 @@ assert(!draw([point(840,1),point(1740,null),point(2640,2)]).includes('L'),'Unkno
 assert(!traceContext.trace([point(0,1),point(600,2)],'value',{...period,sampled_preview:false},t=>Date.parse(t),v=>v).includes('L'),'Real detailed gaps must remain gaps');
 console.log('Router lines: adjacent preview buckets connect; missing/null/detailed gaps remain interrupted.');
 
+// Signed RSSI bands must not be clamped to a positive 0..1 chart.
+const domainContext={Number,Math};vm.createContext(domainContext);
+vm.runInContext(source.slice(source.indexOf('function chartDomain('),source.indexOf('function chart('))+';this.domain=chartDomain',domainContext);
+const bandDefs=[{key:'rssi_24_dbm',unit:'dBm',scale:1},{key:'rssi_5_dbm',unit:'dBm',scale:1}];
+const bands=[
+ {rssi_24_dbm:-65,rssi_5_dbm:-58,values:{rssi_24_dbm:{min:-73,max:-63},rssi_5_dbm:{min:-62,max:-55}}},
+ {rssi_24_dbm:null,rssi_5_dbm:-56,values:{rssi_24_dbm:{min:null,max:null},rssi_5_dbm:{min:-57,max:-56}}},
+ {rssi_24_dbm:-69,rssi_5_dbm:null}
+];
+const bandDomain=domainContext.domain(bands,bandDefs);
+assert(bandDomain.low<=-73&&bandDomain.high>=-55,'RSSI signed extrema must remain inside plot');
+assert(bandDomain.high<0,'Negative dBm readings must never use 0..1 default domain');
+const only24=domainContext.domain([{rssi_24_dbm:-80,rssi_5_dbm:null}],bandDefs);
+assert(only24.low<-80&&only24.high>-80&&only24.high<0,'single 2.4 GHz sample must be visible');
+assert.equal(domainContext.domain([{rssi_24_dbm:null,rssi_5_dbm:null}],bandDefs),null,'missing readings have no domain');
+const percentDomain=domainContext.domain([{cpu_pct:0},{cpu_pct:67}],[{key:'cpu_pct',unit:'%',scale:1}]);
+assert.equal(percentDomain.low,0,'CPU chart keeps nonnegative baseline');
+const counterDomain=domainContext.domain([{wan_rx_bytes:2**30},{wan_rx_bytes:4*2**30}],[{key:'wan_rx_bytes',unit:'GiB',scale:2**30}]);
+assert.equal(counterDomain.low,0,'nonnegative WAN counter chart still starts at zero');
+assert(source.includes("main:'RSSI médio · 2,4 GHz'"),'Wi-Fi legend must not call RSSI client counts');
+console.log('Wi-Fi chart: negative dBm domain, partial/missing bands, extrema and other metrics remain correct.');
+
 for(const file of ['app/static/app.js','app/static/s7/js/app.js']){
  const code=fs.readFileSync(file,'utf8'),start=code.indexOf('function parseTelemetryJson('),end=code.indexOf('async function ',start);
  const c={JSON,Number};vm.createContext(c);vm.runInContext(code.slice(start,end)+';this.parse=parseTelemetryJson',c);
