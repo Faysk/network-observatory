@@ -153,6 +153,33 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(db.execute('SELECT count(*) FROM device_samples').fetchone()[0],0)
             self.assertEqual(db.execute('SELECT count(*) FROM samples').fetchone()[0],1)
 
+    def test_device_probes_run_with_bounded_parallelism_and_finish_timestamp(self):
+        import time
+        for i in range(7):
+            core.add_device({'name':'Synthetic '+str(i),
+                             'ip':'192.168.1.'+str(i+10),'port':443})
+        guard=threading.Lock()
+        active=0;peak=0
+        def simulated(_device):
+            nonlocal active,peak
+            with guard:
+                active+=1;peak=max(peak,active)
+            time.sleep(.035)
+            with guard:active-=1
+            return True,1.5
+        completed_at='2026-10-27T12:59:00+00:00'
+        with patch.object(core,'tcp_probe',side_effect=[(True,1.0),(True,2.0)]), \
+             patch.object(core,'probe_device',side_effect=simulated), \
+             patch.object(core,'utcnow',return_value=completed_at):
+            core.collect_once()
+        self.assertGreater(peak,1,'seven probes should not run serially')
+        self.assertLessEqual(peak,4,'probe fan-out must not exceed four workers')
+        with core.connect() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM device_samples').fetchone()[0],7)
+            self.assertEqual(db.execute('SELECT COUNT(DISTINCT ts) FROM device_samples').fetchone()[0],1)
+            self.assertEqual(db.execute('SELECT ts FROM samples ORDER BY id DESC LIMIT 1').fetchone()[0],
+                             completed_at)
+
     def test_slow_outbox_scan_never_blocks_sqlite_writes(self):
         entered=threading.Event();release=threading.Event()
         finished=threading.Event();written=threading.Event();failures=[]
