@@ -151,6 +151,9 @@ def overview_point(payload):
             if type(v) in (int,float) and math.isfinite(v) and -200<=v<=0]
     point['rssi_dbm']=sum(values)/len(values) if values else None
     point.update(band_rssi(payload))
+    # Old compact rows may have accepted invalid station RSSI during an
+    # arithmetic mean. Mark the corrected calculation to force raw fallback.
+    point['_signal_calc_version']=1
     return point
 
 
@@ -192,9 +195,11 @@ def overview_rows(db, start, end):
             yield row['ts'], overview_point(json.loads(row['payload']))
         return
     rows = db.execute('SELECT ts,payload,compact FROM ('
-                      'SELECT ts,id,payload,1 AS compact FROM router_chart_points WHERE ts>=? AND ts<=? UNION ALL '
+                      'SELECT ts,id,payload,1 AS compact FROM router_chart_points WHERE ts>=? AND ts<=? '
+                      "AND json_extract(payload,'$._signal_calc_version')=1 UNION ALL "
                       'SELECT ts,id,payload,0 AS compact FROM huawei_samples r WHERE ts>=? AND ts<=? '
-                      'AND NOT EXISTS(SELECT 1 FROM router_chart_points p WHERE p.id=r.id)) ORDER BY ts,id',
+                      'AND NOT EXISTS(SELECT 1 FROM router_chart_points p WHERE p.id=r.id '
+                      "AND json_extract(p.payload,'$._signal_calc_version')=1)) ORDER BY ts,id",
                       (start, end, start, end))
     for row in rows:
         payload = json.loads(row['payload'])
@@ -213,9 +218,14 @@ def refresh_wifi_context(db, batch=64, cursors=None):
                                ('client_chart_points', 'router_client_samples', 'wifi_client')):
         after = cursors.get(prefix, 0)
         marker = '$.rssi_24_dbm' if prefix == 'wifi_overview' else '$.wifi_links'
+        # Correct existing overview compact rows as well as absent Wi-Fi band
+        # metadata; old RSSI means may contain coerced boolean/invalid values.
+        mismatch=(" OR COALESCE(json_extract(p.payload,'$._signal_calc_version'),0)<>1"
+                  if prefix=='wifi_overview' else "")
         rows = db.execute(
             f"SELECT r.* FROM {table} p JOIN {raw} r ON r.id=p.id "
-            "WHERE p.id>? AND json_type(p.payload,?) IS NULL ORDER BY p.id LIMIT ?",
+            "WHERE p.id>? AND (json_type(p.payload,?) IS NULL"+mismatch+") "
+            "ORDER BY p.id LIMIT ?",
             (after, marker, batch)).fetchall()
         parent_wifi = {}
         for row in rows:
