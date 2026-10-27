@@ -56,6 +56,37 @@ class WifiEvidenceTests(unittest.TestCase):
         self.assertEqual(legitimate['link_rx_phy_mbps'],0)
         self.assertEqual(legitimate['link_tx_phy_mbps'],300)
 
+    def test_legacy_rssi_projection_recomputes_from_raw_without_mutating_archive(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(core,'DB_PATH',Path(temp)/'router.db'):
+            core.init_db()
+            ts=(datetime.now(timezone.utc)-timedelta(seconds=90)).isoformat()
+            payload={'metrics':{},'stations':[
+                {'interface':'wlan1','rssi_dbm':-70},
+                {'interface':'wlan5','rssi_dbm':True}],
+                'wifi':{'wlan1':{'band':'2.4GHz'},
+                        'wlan5':{'band':'5GHz'}}}
+            with core.connect() as db:
+                rid=db.execute('INSERT INTO huawei_samples(ts,payload) VALUES (?,?)',
+                               (ts,json.dumps(payload))).lastrowid
+                # Old cached mean was corrupted, despite having band metadata.
+                old={'rssi_dbm':-34.5,'rssi_24_dbm':-70,
+                     'rssi_5_dbm':None}
+                db.execute('INSERT INTO router_chart_points(ts,id,payload) VALUES (?,?,?)',
+                           (ts,rid,json.dumps(old)))
+                original=db.execute('SELECT payload FROM huawei_samples WHERE id=?',(rid,)).fetchone()[0]
+                points=list(read_models.overview_rows(db,ts,ts))
+                self.assertEqual(len(points),1)
+                self.assertEqual(points[0][1]['rssi_dbm'],-70)
+                self.assertIsNone(points[0][1]['rssi_5_dbm'])
+                self.assertEqual(read_models.refresh_wifi_context(db,batch=10),1)
+                refreshed=json.loads(db.execute(
+                    'SELECT payload FROM router_chart_points WHERE id=?',(rid,)).fetchone()[0])
+                self.assertEqual(refreshed['rssi_dbm'],-70)
+                self.assertEqual(refreshed['_signal_calc_version'],1)
+                self.assertEqual(read_models.refresh_wifi_context(db,batch=10),0)
+                self.assertEqual(db.execute('SELECT payload FROM huawei_samples WHERE id=?',(rid,)).fetchone()[0],original)
+                self.assertEqual(list(read_models.overview_rows(db,ts,ts))[0][1]['rssi_dbm'],-70)
+
     def test_raw_fallback_and_compact_projections_match_after_refresh(self):
         with tempfile.TemporaryDirectory() as temp, patch.object(core,"DB_PATH",Path(temp)/"router.db"):
             core.init_db()
