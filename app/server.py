@@ -394,7 +394,7 @@ class Handler(BaseHTTPRequestHandler):
         self.close_connection=True
         if getattr(self,'_head_only',False):return
         try:
-            self.wfile.write(b'\\xef\\xbb\\xbf')
+            self.wfile.write(b'\xef\xbb\xbf')
             header=io.StringIO()
             csv.DictWriter(header,fieldnames=fields).writeheader()
             self.wfile.write(header.getvalue().encode('utf-8'))
