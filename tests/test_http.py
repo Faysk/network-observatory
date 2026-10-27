@@ -233,6 +233,22 @@ class HttpTests(unittest.TestCase):
                 self.request(path,payload,'short')
             self.assertEqual(error.exception.code,403)
 
+    def test_api_reads_fail_fast_when_all_slots_are_taken(self):
+        from app.server import API_READ_SLOTS
+        held=0
+        try:
+            for _ in range(24):
+                self.assertTrue(API_READ_SLOTS.acquire(blocking=False))
+                held+=1
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                self.request('/api/status')
+            self.assertEqual(error.exception.code,503)
+            # An ordinary static page is intentionally not charged to API slots.
+            self.assertEqual(self.request('/router/')[0],200)
+        finally:
+            for _ in range(held):API_READ_SLOTS.release()
+        self.assertEqual(self.request('/api/status')[0],200)
+
     def test_simultaneous_raw_exports_are_bounded(self):
         from app.server import EXPORT_SLOTS
         for _ in range(4):
