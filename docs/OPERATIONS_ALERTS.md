@@ -5,6 +5,27 @@ não abre portas novas, não altera Huawei, não configura firewall/WPS/NAT e n�
 executa processos externos para alertas. Sem Push, Telegram, email, SMS ou
 reenvio de dados pessoais.
 
+## Quarentena de leituras inválidas (fila Huawei)
+
+O coletor guarda as recolhas num outbox local, no mesmo volume configurado
+para `FNO_DB`. Se um arquivo `.json` da fila estiver ilegível, tiver UTF-8
+inválido ou não cumprir o schema estrito, **os bytes originais são movidos**
+para `outbox/quarantine/<nome-original>.json`. Não há limpeza automática,
+reescrita do conteúdo ou cópia para o armazenamento interno do Android.
+
+A API `/api/status` informa `recording.pending_samples` e
+`recording.quarantined_samples`, apenas contagens. A consola imprime somente
+quantas amostras novas foram isoladas, sem revelar MACs, IPs ou o JSON.
+A entrega dos outros registros continua normalmente. Falhas de transporte
+ou HTTP **não são classificadas como corrupção**, interrompem o processamento
+e deixam a mensagem pendente para tentar mais tarde. Só há eliminação após
+confirmação positiva de ingestão (HTTP 201).
+
+Recuperação manual: verificar o motivo da rejeição e guardar cópia de backup
+no próprio microSD, analisar offline com ferramentas aprovadas e apenas
+recolocar um arquivo corrigido na fila após validação do schema, nunca
+simular dados ou apagar os originais. Não publicar a quarentena no GitHub.
+
 ## 1. Onde ver no Router
 
 Na página **Configuração e diagnóstico**, antes das fontes aparecem:
