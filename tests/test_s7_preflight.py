@@ -46,7 +46,7 @@ class S7PreflightTests(unittest.TestCase):
     def test_external_origins_and_credentials_are_rejected_before_any_http(self):
         for origin in ('https://127.0.0.1:8765','http://8.8.8.8:8765',
                        'http://bad:pass@localhost:8765',
-                       'http://localhost:8765/other','http://localhost:8765',
+                       'http://localhost:8765/other','http://localhost',
                        'http://127.0.0.1:8765?redirect=1'):
             with self.subTest(origin=origin),patch.object(
                     preflight.urllib.request,'build_opener') as opener:
