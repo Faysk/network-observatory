@@ -27,6 +27,12 @@ INTERVAL = max(30, int(os.environ.get("FNO_INTERVAL", "60")))
 RETENTION_DAYS = max(0, int(os.environ.get("FNO_RETENTION_DAYS", "0")))
 WRITE_TOKEN = os.environ.get("FNO_INGEST_TOKEN", "")
 LOCK = threading.RLock()
+# Budget network probes so 20+ unresponsive devices cannot turn a nominal
+# 30-60s collection interval into minutes of serial timeout waits. Keep the
+# Huawei collector independent; only explicitly registered targets are probed.
+DEVICE_PROBE_BATCH = 16
+_DEVICE_PROBE_CURSOR = 0
+_DEVICE_PROBE_PROGRESS = {'sampled':0,'deferred':0,'tracked':0,'completed_at':None}
 COLLECTOR_STATE={'state':'not_started','last_attempt':None,'last_success':None,'reason':None}
 
 
@@ -163,12 +169,24 @@ def collect_once():
     # network probes. Devices may be deleted while the probes are running.
     with request_timing.acquire(LOCK), connect() as db:
         devices = [dict(row) for row in db.execute("SELECT * FROM devices ORDER BY id")]
-    # Bounded fan-out avoids a single unresponsive device delaying every
-    # subsequent probe. Do not share a SQLite connection across these threads.
-    if devices:
-        with ThreadPoolExecutor(max_workers=min(4,len(devices)),thread_name_prefix='fno-probe') as pool:
-            outcomes=list(pool.map(probe_device,devices))
-        observations=[(device,*outcome) for device,outcome in zip(devices,outcomes)]
+    # Round robin over *explicitly configured* devices. A skipped device keeps
+    # its previous observation; we never fabricate an offline measurement.
+    # The cursor is only advanced by the single active collector worker.
+    global _DEVICE_PROBE_CURSOR
+    count=len(devices)
+    if count:
+        offset=_DEVICE_PROBE_CURSOR % count
+        selected=[devices[(offset+i)%count] for i in range(min(DEVICE_PROBE_BATCH,count))]
+        _DEVICE_PROBE_CURSOR=(offset+len(selected))%count
+    else:
+        selected=[]
+        _DEVICE_PROBE_CURSOR=0
+    # Bounded fan-out: <= 4 simultaneous probes, <= 16 total per cycle.
+    # Do not share a SQLite connection with any network worker.
+    if selected:
+        with ThreadPoolExecutor(max_workers=min(4,len(selected)),thread_name_prefix='fno-probe') as pool:
+            outcomes=list(pool.map(probe_device,selected))
+        observations=[(device,*outcome) for device,outcome in zip(selected,outcomes)]
     else:
         observations=[]
     # Timestamp reflects completion of probes, not their start, and therefore
@@ -196,6 +214,10 @@ def collect_once():
                      f"{d['name']}: {'voltou a responder' if up else 'sem resposta'}",
                      f"Destino {d['ip']} · teste {'TCP/'+str(d['port']) if d['port'] else 'ICMP'}")
         prune_history(db)
+    with LOCK:
+        _DEVICE_PROBE_PROGRESS.update(sampled=len(observations),
+                                      deferred=count-len(observations),
+                                      tracked=count,completed_at=ts)
     return {"router_online": router_up, "internet_online": internet_up}
 
 
@@ -387,6 +409,7 @@ def get_status():
                   "metrics": latest_router(db), "devices": list_devices(db),
                   "huawei": latest_huawei(db),
                   "collector": dict(COLLECTOR_STATE),
+                  "probe_cycle": dict(_DEVICE_PROBE_PROGRESS),
                   "event_count": counts, "server_time": utcnow(),
                   "poll_interval_seconds": INTERVAL, "retention_days": RETENTION_DAYS, "retention_unlimited": RETENTION_DAYS==0,
                   "methodology": {"router": "TCP/80 para a interface web", "internet": "TCP/443 para 1.1.1.1", "device": "ICMP ou porta TCP configurada"}}
