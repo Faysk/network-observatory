@@ -29,12 +29,29 @@ class OutboxSafetyTests(unittest.TestCase):
         self.assertEqual(sent,[{'sample':'synthetic-ok'}])
         self.assertFalse(valid.exists())
         self.assertFalse(invalid.exists())
-        self.assertEqual((self.outbox.path/'quarantine'/invalid.name).read_bytes(),original)
+        self.assertEqual(next((self.outbox.path/'quarantine').rglob(invalid.name)).read_bytes(),original)
         self.assertEqual(self.outbox.pending(),0)
         self.assertEqual(self.outbox.quarantined(),1)
         self.assertEqual(self.outbox.last_quarantined,1)
         self.assertEqual(self.outbox.flush(sent.append),0)
         self.assertEqual(self.outbox.quarantined(),1)
+
+    def test_reused_filename_cannot_overwrite_existing_quarantine(self):
+        source=self.outbox.path/'reused.json'
+        source.write_bytes(b'{"invalid-one":')
+        with patch('app.outbox.validate_payload',return_value=None):
+            self.assertEqual(self.outbox.flush(lambda _payload:None),0)
+        first=next((self.outbox.path/'quarantine').rglob('reused.json'))
+        self.assertEqual(first.read_bytes(),b'{"invalid-one":')
+        source.write_bytes(b'{"invalid-two":')
+        with patch('app.outbox.validate_payload',return_value=None):
+            self.assertEqual(self.outbox.flush(lambda _payload:None),0)
+        records=list((self.outbox.path/'quarantine').rglob('reused.json'))
+        self.assertEqual(len(records),2)
+        self.assertEqual({entry.read_bytes() for entry in records},
+                         {b'{"invalid-one":',b'{"invalid-two":'})
+        self.assertEqual(first.read_bytes(),b'{"invalid-one":')
+        self.assertEqual(self.outbox.quarantined(),2)
 
     def test_schema_invalid_payload_is_quarantined_but_valid_is_delivered(self):
         (self.outbox.path/'00-invalid.json').write_text('{"kind":"invalid"}')
