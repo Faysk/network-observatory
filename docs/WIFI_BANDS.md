@@ -44,7 +44,7 @@ observação; não é prova de falha, desligamento ou qualidade ruim da banda.
 Os pontos isolados continuam visíveis. Quando existem leituras consecutivas
 de uma mesma banda com intervalos reais não superiores a 180 segundos, a
 linha pode conectá-las, incluindo buckets com apenas parte das amostras
-comprovadas. A API fornece, por métrica de cada bucket, os campos
+comprovadas. A API fornece, apenas para as duas métricas RSSI por banda em cada bucket, os campos
 `first_observed_at`, `last_observed_at` e `max_gap_seconds` para decidir
 a conexão sem fabricar amostras. Lacunas maiores, valores desconhecidos,
 amostras com intervalos internos grandes ou dados históricos de versões sem
