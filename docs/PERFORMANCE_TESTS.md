@@ -81,6 +81,22 @@ timeout global forçado, pois interromper uma thread ou uma chamada bloqueada
 de forma insegura poderia causar leituras parciais enganosas. Validar
 consumo, jitter e intervalos no S7 real antes de considerar homologado.
 
+## Ficheiros grandes e memória do servidor
+
+Documentos do Vault e ficheiros estáticos acima do limite de cache de
+assets são transmitidos pelo servidor em blocos de **64 KiB**, sem chamar
+`Path.read_bytes()` para materializar o ficheiro inteiro em RAM. `HEAD`
+devolve os cabeçalhos e o tamanho sem transferir bytes. A resposta conserva
+`Content-Length`, os cabeçalhos de segurança e `Cache-Control: no-store`
+utilizados anteriormente. O código público pequeno mantém o cache
+ETag/gzip existente.
+
+Isto limita o *buffer de leitura por pedido*, não a memória total consumida
+por várias conexões, pelo kernel, nem o comportamento de arquivos
+modificados durante a transferência. Não é uma garantia de tempo máximo
+para clientes lentos, e o Vault continua privado apenas nos termos das
+regras de acesso de origem, não por autenticação individual.
+
 ## Cobertura
 
 - Router: status, inventário, overview resumo/completo e dossiê em 1h/6h/12h/24h/7d/1m/1y.

@@ -129,12 +129,19 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "FayskNOC/0.1"
 
     def respond(self, code, data, mime="application/json; charset=utf-8"):
+        # Large static/Vault files must never be materialized in the S7's RAM.
+        # Path data is streamed in fixed-size chunks; JSON uses existing path.
+        from_file=isinstance(data,Path)
         with request_timing.phase('serialize'):
-            body = json.dumps(data, ensure_ascii=False).encode() if isinstance(data, (dict, list)) else data
-            if isinstance(body, str): body = body.encode()
+            if from_file:
+                size=data.stat().st_size
+                body=None
+            else:
+                body = json.dumps(data, ensure_ascii=False).encode() if isinstance(data, (dict, list)) else data
+                if isinstance(body, str): body = body.encode()
         is_api = urlsplit(self.path).path.startswith('/api/')
         packed = None
-        if is_api and len(body) >= 16384 and _accepts_gzip(self.headers.get('Accept-Encoding')):
+        if is_api and not from_file and len(body) >= 16384 and _accepts_gzip(self.headers.get('Accept-Encoding')):
             with request_timing.phase('compress'):
                 candidate = gzip.compress(body, compresslevel=1, mtime=0)
                 if len(candidate) < len(body)*0.9: packed = candidate
@@ -146,14 +153,22 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header('Vary', 'Accept-Encoding')
             if packed is not None: self.send_header('Content-Encoding', 'gzip')
         self.send_header("Content-Type", mime)
-        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Length", str(size if from_file else len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "SAMEORIGIN" if urlsplit(self.path).path.startswith("/valt/") else "DENY")
         style_policy = " 'unsafe-inline'" if urlsplit(self.path).path.startswith("/s7/") else ""
         self.send_header("Content-Security-Policy", "default-src 'self' data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; frame-src 'self' data: blob:; object-src 'self' data: blob:; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'" if urlsplit(self.path).path.startswith("/valt/") else "default-src 'self'; img-src 'self' data:; style-src 'self'" + style_policy + "; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
         self.end_headers()
-        if not getattr(self,'_head_only',False):self.wfile.write(body)
+        if not getattr(self,'_head_only',False):
+            if from_file:
+                with data.open('rb') as stream:
+                    while True:
+                        chunk=stream.read(64*1024)
+                        if not chunk:break
+                        self.wfile.write(chunk)
+            else:
+                self.wfile.write(body)
 
     def static_code(self, target, mime):
         stat=target.stat()
@@ -264,7 +279,7 @@ class Handler(BaseHTTPRequestHandler):
                 target = (VALT / relative).resolve()
                 if not target.is_relative_to(VALT.resolve()) or not target.is_file():
                     return self.error_json(404, 'Not found')
-                return self.respond(200, target.read_bytes(), mimetypes.guess_type(target)[0] or 'application/octet-stream')
+                return self.respond(200, target, mimetypes.guess_type(target)[0] or 'application/octet-stream')
             if path.path in ('/api/host/snapshot', '/api/host/history', '/api/host/archive', '/api/host/catalog'):
                 from . import host_telemetry
                 monitor = host_telemetry._monitor
@@ -354,7 +369,7 @@ class Handler(BaseHTTPRequestHandler):
             content_type = mimetypes.guess_type(fpath)[0] or "application/octet-stream"
             if fpath.suffix.lower() in ('.js','.css','.svg','.woff2') and fpath.stat().st_size<=512*1024:
                 return self.static_code(fpath,content_type)
-            return self.respond(200, fpath.read_bytes(), content_type)
+            return self.respond(200, fpath, content_type)
         except (ValueError, TypeError) as exc:
             return self.error_json(400, str(exc))
         except Exception as exc:
