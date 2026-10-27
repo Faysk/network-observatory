@@ -24,6 +24,39 @@ class HistorianTests(unittest.TestCase):
         if status=='Online':payload['stations']=[{'rssi_dbm':rssi,'snr_db_reported':40,'rx_link_mbps':144,'tx_link_mbps':72,'interface':'wlan1'}]
         with core.connect() as db:db.execute('INSERT INTO router_client_samples(sample_id,ts,mac,payload) VALUES(?,?,?,?)',(1,ts,self.mac,json.dumps(payload)))
         return payload
+    def test_metric_specific_wifi_evidence_bounds_and_real_gaps(self):
+        start=self.now.replace(microsecond=0)-timedelta(hours=1)
+        # 24-hour window gives a 4-minute bucket; observations are synthetic.
+        buckets=historian.Buckets(start,start+timedelta(hours=24),
+                                  ('rssi_24_dbm','rssi_5_dbm'))
+        def add(seconds,band24,band5):
+            ts=(start+timedelta(seconds=seconds)).isoformat()
+            buckets.add({'timestamp':ts,'rssi_24_dbm':band24,'rssi_5_dbm':band5})
+        add(10,-70,-58)
+        add(70,None,-56)
+        add(130,-68,-55)
+        add(190,-67,-57)
+        add(270,-66,-54)
+        points,stats=buckets.result()
+        self.assertEqual(len(points),2)
+        first=points[0]['values']['rssi_24_dbm']
+        self.assertEqual(first['sample_count'],3)
+        self.assertEqual(first['min'],-70)
+        self.assertEqual(first['max'],-67)
+        self.assertEqual(first['max_gap_seconds'],120)
+        self.assertEqual(first['first_observed_at'],(start+timedelta(seconds=10)).isoformat())
+        self.assertEqual(first['last_observed_at'],(start+timedelta(seconds=190)).isoformat())
+        self.assertEqual(points[0]['values']['rssi_5_dbm']['sample_count'],4)
+        self.assertEqual(stats['rssi_24_dbm']['sample_count'],4)
+        self.assertNotIn('first_observed_at',stats['rssi_24_dbm'])
+
+        missing=historian.Buckets(start,start+timedelta(hours=24),('rssi_24_dbm',))
+        for sec,val in ((10,-70),(70,None),(130,None),(235,-68)):
+            missing.add({'timestamp':(start+timedelta(seconds=sec)).isoformat(),
+                         'rssi_24_dbm':val})
+        span=missing.result()[0][0]['values']['rssi_24_dbm']
+        self.assertEqual(span['max_gap_seconds'],225)
+
     def test_gaps_presence_identity_and_null_traffic(self):
         for seconds,status in ((900,'Online'),(840,'Online'),(780,'Offline'),(300,'Online'),(240,'Unknown')):self.seed(seconds,status,ip='192.168.1.51' if seconds<400 else '192.168.1.50')
         b=historian.device_history(self.identifier,'1h')
