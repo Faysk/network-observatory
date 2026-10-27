@@ -152,12 +152,21 @@ function seriesPath(series,key,period,x,y){
  const resolution=Math.max(60,period.resolution_seconds||60),origin=Date.parse(period.from);
  for(const p of series){
    const value=p[key];if(!Number.isFinite(value)){previous=null;continue;}
-   const incomplete=!period.sampled_preview&&(p.max_gap_seconds>180||(p.values?.[key]?.sample_count<p.sample_count));
+   const evidence=p.values?.[key];
+   const previousEvidence=previous?.values?.[key];
+   // Old API responses remain conservative; new readings use timestamps
+   // for this metric rather than treating every partial bucket as a gap.
+   const hasBounds=Boolean(evidence?.first_observed_at&&evidence?.last_observed_at);
+   const incomplete=!period.sampled_preview&&(hasBounds?
+     evidence.max_gap_seconds>180:
+     (p.max_gap_seconds>180||(evidence?.sample_count<p.sample_count)));
    const epochs=key.includes('_observed_')?'observed_epochs':'counter_epochs';
    const counterDrop=previous&&key.startsWith('wan_')&&(value<previous[key]||(p[epochs]?.[key]!=null&&previous[epochs]?.[key]!=null&&p[epochs][key]!==previous[epochs][key]));
    const gap=counterDrop||previous&&(period.sampled_preview?
      Math.floor((Date.parse(p.timestamp)-origin)/(resolution*1000))-Math.floor((Date.parse(previous.timestamp)-origin)/(resolution*1000))>1:
-     Date.parse(p.timestamp)-Date.parse(previous.timestamp_end||previous.timestamp)>180000);
+     (hasBounds&&previousEvidence?.last_observed_at?
+       Date.parse(evidence.first_observed_at)-Date.parse(previousEvidence.last_observed_at):
+       Date.parse(p.timestamp)-Date.parse(previous.timestamp_end||previous.timestamp))>180000);
    path+=`${previous&&!gap&&!incomplete?'L':'M'}${x(p.timestamp).toFixed(2)},${y(value).toFixed(2)} `;
    previous=incomplete?null:p;
  }
