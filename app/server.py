@@ -181,6 +181,10 @@ class Handler(BaseHTTPRequestHandler):
         if not valid and not getattr(self,'_head_only',False):self.wfile.write(body)
 
     def validate_host(self):
+        target=urlsplit(self.path)
+        if target.scheme or target.netloc:
+            self.error_json(403,'Proxy requests are not supported')
+            return False
         if host_allowed(self.headers.get_all('Host',[])):
             return True
         self.error_json(421,'Host não autorizado; verifique FNO_ALLOWED_HOSTS')
