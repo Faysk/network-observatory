@@ -191,6 +191,32 @@ class HttpTests(unittest.TestCase):
                     self.assertIn(error.exception.code,(403,404))
         self.assertEqual(self.request('/router/')[2]['X-Frame-Options'],'DENY')
 
+    def test_large_vault_and_static_files_stream_without_read_bytes(self):
+        payload=bytes(range(256))*4096
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            file=root/'large.bin'
+            file.write_bytes(payload)
+            original=Path.read_bytes
+            def forbid_full_read(path):
+                if path==file:raise AssertionError('large file must be streamed, not read_bytes')
+                return original(path)
+            with patch('app.server.STATIC',root),patch('app.server.VALT',root), \
+                 patch.object(Path,'read_bytes',new=forbid_full_read):
+                for path in ('/router/large.bin','/valt/large.bin'):
+                    with self.subTest(path=path):
+                        status,body,headers=self.request(path)
+                        self.assertEqual(status,200)
+                        self.assertEqual(body,payload)
+                        self.assertEqual(int(headers['Content-Length']),len(payload))
+                        self.assertEqual(headers['Cache-Control'],'no-store')
+                        self.assertEqual(headers['X-Content-Type-Options'],'nosniff')
+                        head=urllib.request.Request(self.url+path,method='HEAD')
+                        with urllib.request.urlopen(head,timeout=HTTP_TIMEOUT) as response:
+                            self.assertEqual(response.status,200)
+                            self.assertEqual(response.read(),b'')
+                            self.assertEqual(int(response.headers['Content-Length']),len(payload))
+
     def test_csv_export_untrusted_cells_never_become_spreadsheet_formulas(self):
         import csv,io
         from app.server import safe_csv_cell
