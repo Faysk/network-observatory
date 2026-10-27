@@ -29,6 +29,7 @@ def device_mac(identifier):
 
 def sample(ts,payload):
     stations=payload.get('stations',[])
+    stations=stations if isinstance(stations,list) else []
     # Multiple rows are observations, not separate clients; no aggregate traffic is attributed.
     station=stations[0] if stations and isinstance(stations[0],dict) else {}
     links=payload.get('wifi_links')
