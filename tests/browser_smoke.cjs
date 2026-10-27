@@ -79,7 +79,9 @@ const server=http.createServer((req,res)=>{
 server.listen(0,'127.0.0.1',async()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'network-observatory-browser-'));
  const target='http://127.0.0.1:'+server.address().port+(inventorySmoke?'/tests/inventory_browser.html':'/tests/browser_fixture.html');
- const args=['--headless=new','--no-sandbox','--disable-gpu','--disable-dev-shm-usage','--no-first-run',
+ // Keep smooth scrolling/decorative animations out of the virtual-time clock.
+ // Functional checks remain unchanged; ordinary-motion rendering is inspected separately.
+ const args=['--headless=new','--no-sandbox','--disable-gpu','--disable-dev-shm-usage','--no-first-run','--force-prefers-reduced-motion',
   '--user-data-dir='+dir,'--virtual-time-budget=24000','--dump-dom',target];
  const proc=spawn(chrome,args);let stdout='',stderr='';
  proc.stdout.on('data',x=>stdout+=x);proc.stderr.on('data',x=>stderr+=x);
