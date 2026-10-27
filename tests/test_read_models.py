@@ -89,6 +89,58 @@ class HostProjectionTests(unittest.TestCase):
         self.assertEqual(self.monitor.projection_error,'OSError')
         self.assertTrue(self.monitor.history('cpu','24h'))
 
+    def test_non_numeric_temperature_latency_never_become_fake_zero(self):
+        # One bucket with invalid strings and real zeros; only genuine numeric
+        # measurements contribute to AVG. Old v2 projections must be ignored.
+        with closing(sqlite3.connect(self.monitor.path)) as db, db:
+            db.execute('DELETE FROM host_samples')
+            for i,(temp,latency) in enumerate([
+                ('unavailable','timeout'), (None,None), (0,0),
+                (40,120), (-150,-1), (250,1000001),
+                ('37.5','48'), (True,False),
+            ]):
+                sample=empty_snapshot()
+                sample['battery']['temperatureC']=temp
+                sample['network']['latencyMs']=latency
+                db.execute('INSERT INTO host_samples VALUES (?,?)',
+                           (self.now+i,json.dumps(sample)))
+        raw=self.query()[0]
+        names=list(read_models.HOST_EXPRESSIONS)
+        temp_index=names.index('temp')+1
+        latency_index=names.index('latency')+1
+        self.assertEqual(raw[temp_index],20)
+        self.assertEqual(raw[latency_index],60)
+        with closing(sqlite3.connect(self.monitor.path)) as db,db:
+            read_models.init_host(db)
+            db.execute('INSERT INTO host_chart_points(ts,temp,latency,projection_version) VALUES (?,?,?,2)',
+                       (self.now,'unavailable','timeout'))
+        self.assertEqual(self.query()[0][temp_index],20)
+        self.assertEqual(self.query()[0][latency_index],60)
+        self.assertEqual(rebuild(self.monitor.path,'host'),8)
+        self.assertEqual(self.query()[0][temp_index],20)
+        self.assertEqual(self.query()[0][latency_index],60)
+        with closing(sqlite3.connect(self.monitor.path)) as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM host_chart_points WHERE projection_version=3').fetchone()[0],8)
+        self.assertEqual(rebuild(self.monitor.path,'host'),0)
+
+    def test_exclusively_invalid_samples_are_unknown_not_zero(self):
+        with closing(sqlite3.connect(self.monitor.path)) as db,db:
+            db.execute('DELETE FROM host_samples')
+            for i in range(3):
+                sample=empty_snapshot()
+                sample['battery']['temperatureC']='denied'
+                sample['network']['latencyMs']='unavailable'
+                db.execute('INSERT INTO host_samples VALUES (?,?)',
+                           (self.now+i,json.dumps(sample)))
+        names=list(read_models.HOST_EXPRESSIONS)
+        result=self.query()[0]
+        self.assertIsNone(result[names.index('temp')+1])
+        self.assertIsNone(result[names.index('latency')+1])
+        self.assertEqual(rebuild(self.monitor.path,'host'),3)
+        result=self.query()[0]
+        self.assertIsNone(result[names.index('temp')+1])
+        self.assertIsNone(result[names.index('latency')+1])
+
     def test_no_internal_or_missing_volume_fallback(self):
         missing = Path(self.tmp.name)/'absent-sd'/'new.db'
         with self.assertRaises(ValueError):
