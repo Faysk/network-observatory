@@ -41,6 +41,34 @@ class HttpTests(unittest.TestCase):
         req=urllib.request.Request(self.url+path,data=encoded,headers=headers)
         with urllib.request.urlopen(req,timeout=HTTP_TIMEOUT) as res:return res.status,res.read(),dict(res.headers)
 
+    def test_read_acl_denies_unapproved_networks_and_ignores_forwarded_headers(self):
+        from app import server as server_mod
+        import ipaddress
+        grants=server_mod.parse_read_cidrs('192.168.50.0/24,10.10.0.6')
+        with patch.object(server_mod,'READ_ALLOWED_CIDRS',grants):
+            for peer,allowed in [('127.0.0.1',True),('::1',True),
+                                 ('::ffff:127.0.0.1',True),
+                                 ('192.168.50.42',True),('10.10.0.6',True),
+                                 ('10.10.0.7',False),('192.168.51.1',False),
+                                 ('8.8.8.8',False)]:
+                with self.subTest(peer=peer):
+                    self.assertIs(server_mod.source_allowed(peer),allowed)
+        for cidr in ('0.0.0.0/0','8.8.8.8/32','172.0.0.0/8',
+                     '192.168.0.0/15','fe80::/10','invalid'):
+            with self.subTest(cidr=cidr),self.assertRaises(ValueError):
+                server_mod.parse_read_cidrs(cidr)
+        with patch.object(server_mod,'READ_ALLOWED_CIDRS',()):
+            self.assertFalse(server_mod.source_allowed('192.168.1.42'))
+        with patch.object(server_mod,'source_allowed',return_value=False):
+            req=urllib.request.Request(self.url+'/api/status',headers={
+                'X-Forwarded-For':'127.0.0.1','Host':'localhost'})
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                urllib.request.urlopen(req,timeout=HTTP_TIMEOUT)
+            self.assertEqual(error.exception.code,403)
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                self.request('/api/devices',{'name':'No access','ip':'192.168.1.30'},core.WRITE_TOKEN)
+            self.assertEqual(error.exception.code,403)
+
     def test_absolute_request_target_is_not_a_proxy(self):
         import http.client
         conn=http.client.HTTPConnection('127.0.0.1',self.srv.server_address[1],timeout=HTTP_TIMEOUT)

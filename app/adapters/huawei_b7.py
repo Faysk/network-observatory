@@ -747,7 +747,9 @@ def main():
     if args.serve:
         from http.server import ThreadingHTTPServer
         from app import core
-        from app.server import Handler
+        from app.server import Handler, READ_ALLOWED_CIDRS
+        if args.bind not in ('127.0.0.1','localhost','::1') and not READ_ALLOWED_CIDRS:
+            print('Leitura LAN bloqueada por padrão: configure FNO_READ_ALLOW_CIDRS para os clientes autorizados.')
         core.WRITE_TOKEN = token
         core.init_db()
         try:

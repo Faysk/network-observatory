@@ -9,6 +9,10 @@ services:
       FNO_INTERVAL: ${FNO_INTERVAL:-60}
       FNO_RETENTION_DAYS: ${FNO_RETENTION_DAYS:-0}
       FNO_INGEST_TOKEN: ${FNO_INGEST_TOKEN:-}
+      # Loopback-published host port reaches the container through a Docker
+      # bridge gateway (usually 172.17.x.x), not 127.0.0.1. This explicit
+      # container-side exception is safe only while ports binds host loopback.
+      FNO_READ_ALLOW_CIDRS: ${FNO_READ_ALLOW_CIDRS:-172.16.0.0/12}
     volumes:
       - observatory-data:/service/data
     read_only: true
