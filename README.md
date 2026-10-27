@@ -105,6 +105,13 @@ Sem essa variável, chamadas locais a `127.0.0.1` continuam disponíveis, mas
 PCs e telemóveis remotos recebem HTTP 403. Confirmar a sub-rede real da
 instalação antes da atualização do S7; não copiar uma faixa por adivinhação.
 CIDRs precisam pertencer inteiramente a 10/8, 172.16/12 ou 192.168/16.
+No Docker Compose incluído, a porta do **host** permanece publicada apenas em
+`127.0.0.1`. O processo dentro do container enxerga o peer como endereço da
+ponte Docker (normalmente `172.17.x.x`), por isso o Compose concede
+explicitamente `172.16.0.0/12` **somente dentro desse namespace**. Não mude
+a publicação `127.0.0.1:8765:8765` para `8765:8765` mantendo essa permissão;
+se a ponte tiver outra faixa, configure um CIDR mais específico na implantação.
+
 Este controlo é **ACL de rede, não login**: MACs e histórico ainda são
 visíveis a todos os hosts autorizados. Para redes com clientes não confiáveis,
 preferir proxy com TLS/autenticação e VPN. Nunca criar port-forward público.
