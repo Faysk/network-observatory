@@ -19,7 +19,7 @@ from . import core, request_timing
 STATIC = Path(__file__).resolve().parent / "static"
 VALT = STATIC.parent.parent / "sites" / "valt"
 # Avoid unbounded simultaneous long-running, read-only archive exports on S7.
-EXPORT_SLOTS = threading.BoundedSemaphore(2)
+EXPORT_SLOTS = threading.BoundedSemaphore(4)
 
 # Disposable in-memory cache for public code only. No API or Vault files.
 @lru_cache(maxsize=16)
