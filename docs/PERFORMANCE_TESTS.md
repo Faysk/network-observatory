@@ -58,6 +58,29 @@ podem variar durante uma entrega concorrente e **não representam um snapshot
 atómico** com as métricas do router. Um teste de regressão simula uma
 enumeração lenta e exige a conclusão de uma escrita simultânea.
 
+## Cadência da coleta de dispositivos cadastrados (27/10/2026)
+
+O coletor básico só sonda os endereços explicitamente adicionados pelo
+operador, **nunca varre a sub-rede**. Para preservar o orçamento da rodada,
+seleciona no máximo **16 dispositivos por ciclo**, com até quatro sondagens
+concomitantes. Quando existem mais de 16, a próxima rodada continua num
+rodízio; as leituras dos restantes **não** são alteradas, não são
+convertidas em `offline` e não geram falsos eventos de reconexão.
+
+`/api/status` informa `probe_cycle.sampled`, `deferred`, `tracked` e
+`completed_at`, que se referem à última rodada **concluída**, não ao estado
+de cada dispositivo naquele instante. A página pode consultar os horários
+individuais para reconhecer leituras desatualizadas. O limite de 16 é uma
+proteção conservadora, não uma medição da capacidade física do S7.
+
+O agendamento do coletor usa intervalo entre inícios de ciclos por relógio
+monotónico. Caso uma execução exceda uma ou mais janelas, ignora os ticks
+perdidos e retoma na próxima janela futura — não executa backlog de sondas
+para compensar atrasos nem acelera o coletor Huawei. O ciclo não tem
+timeout global forçado, pois interromper uma thread ou uma chamada bloqueada
+de forma insegura poderia causar leituras parciais enganosas. Validar
+consumo, jitter e intervalos no S7 real antes de considerar homologado.
+
 ## Cobertura
 
 - Router: status, inventário, overview resumo/completo e dossiê em 1h/6h/12h/24h/7d/1m/1y.
