@@ -5,6 +5,7 @@ Projections retain each observation; aggregation still happens for the requested
 window. Missing/invalidated rows fall back to original payloads during migration.
 """
 import json
+import math
 import sqlite3
 import warnings
 
@@ -14,8 +15,10 @@ HOST_EXPRESSIONS = {
     'rx': "CASE WHEN json_type(payload,'$.network.rxMbps') IN ('integer','real') AND json_extract(payload,'$.network.rxMbps')>=0 THEN json_extract(payload,'$.network.rxMbps') END",
     'tx': "CASE WHEN json_type(payload,'$.network.txMbps') IN ('integer','real') AND json_extract(payload,'$.network.txMbps')>=0 THEN json_extract(payload,'$.network.txMbps') END",
     'battery': "CASE WHEN json_type(payload,'$.battery.levelPercent') IN ('integer','real') AND json_extract(payload,'$.battery.levelPercent') BETWEEN 0 AND 100 THEN json_extract(payload,'$.battery.levelPercent') END",
-    'temp': "json_extract(payload,'$.battery.temperatureC')",
-    'latency': "json_extract(payload,'$.network.latencyMs')",
+    # SQLite AVG(text) silently coerces nonnumeric strings to 0. Keep invalid
+    # sensor readings NULL; do not fabricate zero degrees or milliseconds.
+    'temp': "CASE WHEN json_type(payload,'$.battery.temperatureC') IN ('integer','real') AND json_extract(payload,'$.battery.temperatureC') BETWEEN -100 AND 200 THEN json_extract(payload,'$.battery.temperatureC') END",
+    'latency': "CASE WHEN json_type(payload,'$.network.latencyMs') IN ('integer','real') AND json_extract(payload,'$.network.latencyMs') BETWEEN 0 AND 1000000 THEN json_extract(payload,'$.network.latencyMs') END",
     'storage': "(SELECT 100.0*json_extract(v.value,'$.usedGB')/nullif(json_extract(v.value,'$.totalGB'),0) FROM json_each(payload,'$.storage') v WHERE json_extract(v.value,'$.id')='internal' AND json_type(v.value,'$.usedGB') IN ('integer','real') AND json_type(v.value,'$.totalGB') IN ('integer','real') AND json_extract(v.value,'$.usedGB') BETWEEN 0 AND json_extract(v.value,'$.totalGB') LIMIT 1)",
 }
 
@@ -52,7 +55,7 @@ def init_host(db):
     columns = ','.join('"'+name+'"' for name in HOST_EXPRESSIONS)
     db.execute('SAVEPOINT chart_schema')
     try:
-        db.execute('CREATE TABLE IF NOT EXISTS host_chart_points(ts REAL PRIMARY KEY,'+columns+',projection_version INTEGER NOT NULL DEFAULT 2) WITHOUT ROWID')
+        db.execute('CREATE TABLE IF NOT EXISTS host_chart_points(ts REAL PRIMARY KEY,'+columns+',projection_version INTEGER NOT NULL DEFAULT 3) WITHOUT ROWID')
         if not any(row[1]=='projection_version' for row in db.execute('PRAGMA table_info(host_chart_points)')):
             db.execute('ALTER TABLE host_chart_points ADD COLUMN projection_version INTEGER NOT NULL DEFAULT 1')
         for operation in ('DELETE', 'UPDATE'):
@@ -67,7 +70,7 @@ def init_host(db):
 def project_host(db, stamp):
     columns = ','.join('"'+name+'"' for name in HOST_EXPRESSIONS)
     db.execute('INSERT OR REPLACE INTO host_chart_points(ts,'+columns+',projection_version) SELECT ts,'+
-               ','.join(HOST_EXPRESSIONS.values())+',2 FROM host_samples WHERE ts=?', (stamp,))
+               ','.join(HOST_EXPRESSIONS.values())+',3 FROM host_samples WHERE ts=?', (stamp,))
 
 
 def query_host(db, cutoff, bucket, until=None):
@@ -76,9 +79,9 @@ def query_host(db, cutoff, bucket, until=None):
     values = ','.join('"'+name+'"' for name in names)
     averages = ','.join('AVG("'+name+'")' for name in names)
     if exists(db, 'host_chart_points') and any(row[1]=='projection_version' for row in db.execute('PRAGMA table_info(host_chart_points)')):
-        source = ('SELECT ts,'+values+' FROM host_chart_points WHERE ts>=? AND ts<=? AND projection_version=2 UNION ALL '
+        source = ('SELECT ts,'+values+' FROM host_chart_points WHERE ts>=? AND ts<=? AND projection_version=3 UNION ALL '
                   'SELECT ts,'+','.join(HOST_EXPRESSIONS.values())+' FROM host_samples r '
-                  'WHERE ts>=? AND ts<=? AND NOT EXISTS(SELECT 1 FROM host_chart_points p WHERE p.ts=r.ts AND p.projection_version=2)')
+                  'WHERE ts>=? AND ts<=? AND NOT EXISTS(SELECT 1 FROM host_chart_points p WHERE p.ts=r.ts AND p.projection_version=3)')
         parameters = (cutoff, until, cutoff, until, bucket)
     else:
         source = ('SELECT ts,'+','.join(expression+' AS "'+name+'"' for name, expression in HOST_EXPRESSIONS.items())+
@@ -139,10 +142,19 @@ def overview_point(payload):
     point.update(wan_rx_bytes=counters.get('rx_bytes'), wan_tx_bytes=counters.get('tx_bytes'))
     if 'clients' in payload:
         point['online_clients'] = sum(c.get('reported_status') == 'Online' for c in payload['clients'])
-    values = [s['rssi_dbm'] for s in payload.get('stations', []) if s.get('rssi_dbm') is not None]
-    if values:
-        point['rssi_dbm'] = sum(values)/len(values)
+    # Compute a sample mean only from plausible, finite AP-reported signal
+    # readings. Booleans/text (including "unknown") must not become 1 or 0,
+    # and malformed legacy rows must not crash the historical projection.
+    stations=payload.get('stations')
+    stations=stations if isinstance(stations,list) else []
+    values=[v for station in stations[:128] if isinstance(station,dict)
+            for v in [station.get('rssi_dbm')]
+            if type(v) in (int,float) and math.isfinite(v) and -200<=v<=0]
+    point['rssi_dbm']=sum(values)/len(values) if values else None
     point.update(band_rssi(payload))
+    # Old compact rows may have accepted invalid station RSSI during an
+    # arithmetic mean. Mark the corrected calculation to force raw fallback.
+    point['_signal_calc_version']=1
     return point
 
 
@@ -184,9 +196,11 @@ def overview_rows(db, start, end):
             yield row['ts'], overview_point(json.loads(row['payload']))
         return
     rows = db.execute('SELECT ts,payload,compact FROM ('
-                      'SELECT ts,id,payload,1 AS compact FROM router_chart_points WHERE ts>=? AND ts<=? UNION ALL '
+                      'SELECT ts,id,payload,1 AS compact FROM router_chart_points WHERE ts>=? AND ts<=? '
+                      "AND json_extract(payload,'$._signal_calc_version')=1 UNION ALL "
                       'SELECT ts,id,payload,0 AS compact FROM huawei_samples r WHERE ts>=? AND ts<=? '
-                      'AND NOT EXISTS(SELECT 1 FROM router_chart_points p WHERE p.id=r.id)) ORDER BY ts,id',
+                      'AND NOT EXISTS(SELECT 1 FROM router_chart_points p WHERE p.id=r.id '
+                      "AND json_extract(p.payload,'$._signal_calc_version')=1)) ORDER BY ts,id",
                       (start, end, start, end))
     for row in rows:
         payload = json.loads(row['payload'])
@@ -205,9 +219,14 @@ def refresh_wifi_context(db, batch=64, cursors=None):
                                ('client_chart_points', 'router_client_samples', 'wifi_client')):
         after = cursors.get(prefix, 0)
         marker = '$.rssi_24_dbm' if prefix == 'wifi_overview' else '$.wifi_links'
+        # Correct existing overview compact rows as well as absent Wi-Fi band
+        # metadata; old RSSI means may contain coerced boolean/invalid values.
+        mismatch=(" OR COALESCE(json_extract(p.payload,'$._signal_calc_version'),0)<>1"
+                  if prefix=='wifi_overview' else "")
         rows = db.execute(
             f"SELECT r.* FROM {table} p JOIN {raw} r ON r.id=p.id "
-            "WHERE p.id>? AND json_type(p.payload,?) IS NULL ORDER BY p.id LIMIT ?",
+            "WHERE p.id>? AND (json_type(p.payload,?) IS NULL"+mismatch+") "
+            "ORDER BY p.id LIMIT ?",
             (after, marker, batch)).fetchall()
         parent_wifi = {}
         for row in rows:
@@ -255,7 +274,7 @@ def backfill_host(db, batch=32, cursors=None):
     init_host(db)
     after = cursors.get('host', -1e300) if cursors is not None else -1e300
     rows = db.execute('SELECT ts FROM host_samples r WHERE ts>? AND NOT EXISTS('
-                      'SELECT 1 FROM host_chart_points p WHERE p.ts=r.ts AND p.projection_version=2) ORDER BY ts LIMIT ?', (after, batch)).fetchall()
+                      'SELECT 1 FROM host_chart_points p WHERE p.ts=r.ts AND p.projection_version=3) ORDER BY ts LIMIT ?', (after, batch)).fetchall()
     for row in rows:
         project_host(db, row[0])
     if rows and cursors is not None:

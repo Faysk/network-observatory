@@ -33,6 +33,44 @@
 
 A expressão de armazenamento encontra `id=internal`; ausência desse volume resulta em null. A coluna `projection_version` distingue projeções antigas. Consultas leem a origem bruta para linhas antigas até a reconstrução em lotes no próprio microSD. Nenhuma amostra bruta é apagada ou reescrita. Limite superior da consulta impede exibir pontos do arquivo com timestamp futuro após correção do relógio. O cursor do arquivo permanece monotônico e os originais continuam acessíveis.
 
+## Revisão dos cálculos: validade numérica e histórico legado (27/10/2026)
+
+- **S7 — temperatura da bateria (°C) e latência (ms):** as médias SQLite
+  aceitam apenas tipos JSON numéricos. Cadeias como `"unavailable"`,
+  booleanos, `null` e valores fora do domínio de validação deixam de virar
+  **0** devido à conversão implícita de `AVG(text)`. Um zero de sensor
+  realmente numérico continua zero; se não houver nenhuma leitura válida no
+  intervalo, o resultado é `null`, não zero.
+- **Domínios defensivos:** temperatura em `[-100,200] °C`; latência em
+  `[0,1.000.000] ms`. Esses limites são verificações de sanidade
+  extremamente amplas, **não** certificações de calibração do sensor.
+- **Projeção S7 v3:** novas projeções usam `projection_version=3`. Dados
+  compactos v1/v2 permanecem no microSD, mas a consulta **recalcula a partir
+  do JSON bruto** até que o operador faça reconstrução offline em lotes
+  usando `python tools/build_read_models.py --host-db CAMINHO_REAL_EXISTENTE`.
+  A reconstrução não é executada automaticamente durante consultas HTTP.
+- **Wi-Fi — RSSI:** as médias de estações e pontos individuais só usam
+  números finitos em `[-200,0] dBm`. Não convertem `True`, `False`,
+  `"unknown"`, números impossíveis ou `null` em sinal medido. Trata-se
+  de **média aritmética de leituras RSSI em dBm**, não potência total da
+  antena, média logarítmica de potência ou qualidade garantida da conexão.
+- **Projeção Router:** cada agregado RSSI corrigido tem
+  `_signal_calc_version=1`. Registros compactos antigos não confiáveis
+  são lidos a partir da amostra bruta; para reconstruir de forma explícita
+  e controlada, usar
+  `python tools/build_read_models.py --router-db CAMINHO_REAL_EXISTENTE --refresh-wifi`.
+  As observações originais não são alteradas.
+- **Sem estimativas inventadas:** lacunas, mudança de contador, ausência de
+  associação à banda e amostras inválidas permanecem ausentes. A agregação
+  histórica continua uma **média por amostra válida**, sem alegar
+  ponderação temporal, uso do canal ou tráfego por dispositivo.
+
+**Migração:** estas reconstruções criam/atualizam somente tabelas de
+projeção no SQLite existente, então **exigem backup verificado, microSD
+saudável e autorização operacional antes de executar no S7 real**.
+A velocidade do primeiro gráfico sobre arquivos antigos pode ser menor
+enquanto faltar projeção atual; isso não autoriza truncar ou eliminar dados.
+
 ## Repetir a auditoria
 
 `python -m unittest discover -s tests -v` cobre fórmulas e casos de borda com fixtures inventadas. `node tests/test_sheet_requests.cjs` cobre continuidade e precisão JSON; `node tests/test_s7_ui.cjs` cobre apresentação/zero/null e espaço disponível. A matriz de desempenho continua a validar cada métrica/período.
