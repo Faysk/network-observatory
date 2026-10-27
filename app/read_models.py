@@ -5,6 +5,7 @@ Projections retain each observation; aggregation still happens for the requested
 window. Missing/invalidated rows fall back to original payloads during migration.
 """
 import json
+import math
 import sqlite3
 import warnings
 
@@ -141,9 +142,14 @@ def overview_point(payload):
     point.update(wan_rx_bytes=counters.get('rx_bytes'), wan_tx_bytes=counters.get('tx_bytes'))
     if 'clients' in payload:
         point['online_clients'] = sum(c.get('reported_status') == 'Online' for c in payload['clients'])
-    values = [s['rssi_dbm'] for s in payload.get('stations', []) if s.get('rssi_dbm') is not None]
-    if values:
-        point['rssi_dbm'] = sum(values)/len(values)
+    # Compute a sample mean only from plausible, finite AP-reported signal
+    # readings. Booleans/text (including "unknown") must not become 1 or 0,
+    # and malformed legacy rows must not crash the historical projection.
+    stations=payload.get('stations') or []
+    values=[v for station in stations[:128] if isinstance(station,dict)
+            for v in [station.get('rssi_dbm')]
+            if type(v) in (int,float) and math.isfinite(v) and -200<=v<=0]
+    point['rssi_dbm']=sum(values)/len(values) if values else None
     point.update(band_rssi(payload))
     return point
 
