@@ -153,6 +153,40 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(db.execute('SELECT count(*) FROM device_samples').fetchone()[0],0)
             self.assertEqual(db.execute('SELECT count(*) FROM samples').fetchone()[0],1)
 
+    def test_slow_outbox_scan_never_blocks_sqlite_writes(self):
+        entered=threading.Event();release=threading.Event()
+        finished=threading.Event();written=threading.Event();failures=[]
+        original_glob=Path.glob
+        def slow_glob(path,pattern):
+            if path.name=='outbox' and pattern=='*.json':
+                entered.set()
+                if not release.wait(3):
+                    raise TimeoutError('synthetic slow queue scan')
+            return original_glob(path,pattern)
+        def reader():
+            try:core.get_status()
+            except Exception as exc:failures.append(exc)
+            finally:finished.set()
+        def writer():
+            try:core.put_router_metrics({'cpu_pct':31},'synthetic-lock-audit')
+            except Exception as exc:failures.append(exc)
+            finally:written.set()
+        with patch.object(Path,'glob',new=slow_glob):
+            thread=threading.Thread(target=reader,daemon=True)
+            thread.start()
+            try:
+                self.assertTrue(entered.wait(2),'status did not scan the queue')
+                writer_thread=threading.Thread(target=writer,daemon=True)
+                writer_thread.start()
+                self.assertTrue(written.wait(1),'a slow queue scan held the SQLite lock')
+            finally:
+                release.set()
+                thread.join(3)
+                if 'writer_thread' in locals():writer_thread.join(3)
+        self.assertTrue(finished.is_set())
+        self.assertEqual(failures,[])
+        self.assertEqual(core.get_status()['metrics']['metrics']['cpu_pct'],31)
+
     def test_legacy_history_marks_truncation_and_downsampling(self):
         now=datetime.now(timezone.utc).isoformat()
         with core.connect() as db:
