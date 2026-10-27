@@ -207,14 +207,14 @@ class HttpTests(unittest.TestCase):
 
     def test_simultaneous_raw_exports_are_bounded(self):
         from app.server import EXPORT_SLOTS
-        self.assertTrue(EXPORT_SLOTS.acquire(blocking=False))
-        self.assertTrue(EXPORT_SLOTS.acquire(blocking=False))
+        for _ in range(4):
+            self.assertTrue(EXPORT_SLOTS.acquire(blocking=False))
         try:
             with self.assertRaises(urllib.error.HTTPError) as error:
                 self.request('/api/v1/devices/020000000001/export.csv?period=24h')
             self.assertEqual(error.exception.code,503)
         finally:
-            EXPORT_SLOTS.release();EXPORT_SLOTS.release()
+            for _ in range(4):EXPORT_SLOTS.release()
 
     def test_head_export_sends_no_body(self):
         from test_huawei import payload,fixture
