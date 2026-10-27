@@ -191,6 +191,28 @@ class HttpTests(unittest.TestCase):
                     self.assertIn(error.exception.code,(403,404))
         self.assertEqual(self.request('/router/')[2]['X-Frame-Options'],'DENY')
 
+    def test_bounded_http_workers_refuse_overflow_and_release_on_failure(self):
+        from app.server import BoundedHTTPServer
+        server=BoundedHTTPServer(('127.0.0.1',0),Handler,connection_limit=1)
+        try:
+            self.assertTrue(server._connection_slots.acquire(blocking=False))
+            with patch.object(server,'shutdown_request') as rejected:
+                fake_request=object()
+                server.process_request(fake_request,('127.0.0.1',12345))
+                rejected.assert_called_once_with(fake_request)
+            server._connection_slots.release()
+            with patch.object(ThreadingHTTPServer,'process_request',
+                              side_effect=RuntimeError('synthetic thread creation failure')):
+                with self.assertRaisesRegex(RuntimeError,'synthetic'):
+                    server.process_request(object(),('127.0.0.1',12345))
+            self.assertTrue(server._connection_slots.acquire(blocking=False),
+                            'failed worker startup must release connection slot')
+            server._connection_slots.release()
+        finally:
+            server.server_close()
+        with self.assertRaises(ValueError):
+            BoundedHTTPServer(('127.0.0.1',0),Handler,connection_limit=0)
+
     def test_large_vault_and_static_files_stream_without_read_bytes(self):
         payload=bytes(range(256))*4096
         with tempfile.TemporaryDirectory() as folder:

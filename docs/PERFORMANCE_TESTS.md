@@ -97,6 +97,27 @@ modificados durante a transferência. Não é uma garantia de tempo máximo
 para clientes lentos, e o Vault continua privado apenas nos termos das
 regras de acesso de origem, não por autenticação individual.
 
+## Limite de conexões HTTP e clientes lentos
+
+A aplicação executada por `app.server.main()` usa `BoundedHTTPServer`.
+São aceites no máximo **32 conexões HTTP ativas**, incluindo clientes que
+ainda não terminaram de enviar os cabeçalhos ou que pediram ficheiros
+estáticos. Conexões excedentes são encerradas antes de criar outra thread.
+O `Handler` usa timeout de inatividade de I/O de **30 segundos** em
+leituras/escritas; conexões com cabeçalhos incompletos ou envio bloqueado
+deixam de ocupar o trabalhador indefinidamente.
+
+Esse limite é adicional aos 24 slots de API e aos quatro slots de
+exportação. Arquivos já parcialmente enviados não recebem uma segunda
+resposta HTTP em caso de desconexão/timeout. O timeout é por operação de
+I/O e não determina uma duração máxima total de download.
+
+Os servidores `ThreadingHTTPServer` construídos diretamente nas fixtures
+mantêm-se disponíveis para testar os contratos HTTP isoladamente;
+`BoundedHTTPServer` é utilizado no ponto de entrada de produção.
+Isso reduz o impacto de clientes acidentalmente lentos na LAN, mas não
+substitui autenticação, firewall, rate limiting por IP ou proteção de DDoS.
+
 ## Cobertura
 
 - Router: status, inventário, overview resumo/completo e dossiê em 1h/6h/12h/24h/7d/1m/1y.
