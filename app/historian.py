@@ -56,6 +56,8 @@ class Buckets:
         for key in self.keys:
             value=point.get(key)
             if type(value) not in (int,float) or not math.isfinite(value):continue
+            if key in ('rssi_dbm','rssi_24_dbm','rssi_5_dbm') and not -200<=value<=0:
+                continue
             for target in (self.stats,bucket['values']):
                 item=target.setdefault(key,{'count':0,'sum':0,'min':None,'max':None})
                 item['count']+=1;item['sum']+=value
