@@ -145,7 +145,8 @@ def overview_point(payload):
     # Compute a sample mean only from plausible, finite AP-reported signal
     # readings. Booleans/text (including "unknown") must not become 1 or 0,
     # and malformed legacy rows must not crash the historical projection.
-    stations=payload.get('stations') or []
+    stations=payload.get('stations')
+    stations=stations if isinstance(stations,list) else []
     values=[v for station in stations[:128] if isinstance(station,dict)
             for v in [station.get('rssi_dbm')]
             if type(v) in (int,float) and math.isfinite(v) and -200<=v<=0]
