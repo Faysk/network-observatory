@@ -30,12 +30,15 @@ def device_mac(identifier):
 def sample(ts,payload):
     stations=payload.get('stations',[])
     # Multiple rows are observations, not separate clients; no aggregate traffic is attributed.
-    station=stations[0] if stations else {}
+    station=stations[0] if stations and isinstance(stations[0],dict) else {}
     links=payload.get('wifi_links')
     links=links if isinstance(links,list) and links else station_links(stations,{})
+    def measured(key,low,high):
+        value=station.get(key)
+        return value if type(value) in (int,float) and math.isfinite(value) and low<=value<=high else None
     return {'timestamp':ts,'online':{'Online':True,'Offline':False}.get(payload.get('reported_status')),
-            'rssi_dbm':station.get('rssi_dbm'),'snr_db':station.get('snr_db_reported'),
-            'link_rx_phy_mbps':station.get('rx_link_mbps'),'link_tx_phy_mbps':station.get('tx_link_mbps'),
+            'rssi_dbm':measured('rssi_dbm',-200,0),'snr_db':measured('snr_db_reported',-100,200),
+            'link_rx_phy_mbps':measured('rx_link_mbps',0,100000),'link_tx_phy_mbps':measured('tx_link_mbps',0,100000),
             'download_mbps':None,'upload_mbps':None,'latency_lan_ms':None,
             'interface':station.get('interface'),'wifi_links':links,'ips':payload.get('ips',[]),
             'source':SOURCE,'quality':'reported','confidence':'reported',
