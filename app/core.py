@@ -7,6 +7,7 @@ from __future__ import annotations
 import ipaddress
 from contextlib import contextmanager
 import json
+import math
 import os
 import socket
 import sqlite3
@@ -158,6 +159,11 @@ def collect_once():
     # Remote TCP/443 measures a specific Internet path, NOT broadband speed.
     internet_up, internet_ms = tcp_probe("1.1.1.1", 443)
     ts = utcnow()
+    # Never hold the global database lock (or a WAL transaction) during slow
+    # network probes. Devices may be deleted while the probes are running.
+    with request_timing.acquire(LOCK), connect() as db:
+        devices = [dict(row) for row in db.execute("SELECT * FROM devices ORDER BY id")]
+    observations = [(device, *probe_device(device)) for device in devices]
     with request_timing.acquire(LOCK), connect() as db:
         prev = db.execute("SELECT router_online,internet_online FROM samples ORDER BY id DESC LIMIT 1").fetchone()
         db.execute("INSERT INTO samples(ts,router_online,router_ms,internet_online,internet_ms) VALUES(?,?,?,?,?)",
@@ -168,9 +174,10 @@ def collect_once():
                     emit(db, "info" if current else "critical", "connectivity",
                          f"{text}: {'recuperado' if current else 'indisponível'}",
                          "Mudança de estado confirmada numa recolha; falhas transitórias ainda podem ocorrer.")
-        devices = db.execute("SELECT * FROM devices ORDER BY id").fetchall()
-        for d in devices:
-            up, ms = probe_device(d)
+        for d,up,ms in observations:
+            # A removed device must not be resurrected by an in-flight probe.
+            if db.execute("SELECT 1 FROM devices WHERE id=?", (d["id"],)).fetchone() is None:
+                continue
             before = db.execute("SELECT online FROM device_samples WHERE device_id=? ORDER BY id DESC LIMIT 1", (d["id"],)).fetchone()
             db.execute("INSERT INTO device_samples(ts,device_id,online,latency_ms) VALUES(?,?,?,?)",
                        (ts, d["id"], int(up), ms))
@@ -205,7 +212,7 @@ def put_router_metrics(data, source):
         raise ValueError("No recognized metrics")
     for key, value in fields.items():
         if key in NUMERIC_FIELDS:
-            if isinstance(value, bool) or not isinstance(value, (int, float)) or abs(value) > 1e18:
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or abs(value) > 1e18:
                 raise ValueError(f"Bad numeric metric: {key}")
             if key in {"cpu_pct", "memory_pct"} and not 0 <= value <= 100:
                 raise ValueError(f"Invalid percent: {key}")
@@ -379,17 +386,25 @@ def get_status():
 def get_history(hours=24, limit=450):
     cutoff = datetime.fromtimestamp(time.time() - hours*3600, tz=timezone.utc).isoformat(timespec="seconds")
     with request_timing.acquire(LOCK), connect() as db:
-        rows = db.execute("SELECT * FROM samples WHERE ts>=? ORDER BY id DESC LIMIT 5000", (cutoff,)).fetchall()
-        metrics = db.execute("SELECT * FROM router_metrics WHERE ts>=? ORDER BY id DESC LIMIT 5000", (cutoff,)).fetchall()
-        huawei = db.execute('SELECT payload FROM huawei_samples WHERE ts>=? ORDER BY id DESC LIMIT 5000', (cutoff,)).fetchall()
-    rows = list(reversed(rows)); metrics = list(reversed(metrics))
+        rows = db.execute("SELECT * FROM samples WHERE ts>=? ORDER BY ts DESC,id DESC LIMIT 5001", (cutoff,)).fetchall()
+        metrics = db.execute("SELECT * FROM router_metrics WHERE ts>=? ORDER BY ts DESC,id DESC LIMIT 5001", (cutoff,)).fetchall()
+        huawei = db.execute('SELECT payload FROM huawei_samples WHERE ts>=? ORDER BY ts DESC,id DESC LIMIT 5001', (cutoff,)).fetchall()
+    # Legacy endpoint retains the bounded window, but always declares data loss.
+    truncated = {'probes':len(rows)>5000,'router':len(metrics)>5000,'huawei':len(huawei)>5000}
+    rows = list(reversed(rows[:5000]));metrics = list(reversed(metrics[:5000]))
+    huawei = list(reversed(huawei[:5000]))
     def downsample(data):
         if len(data) <= limit: return data
         stride = max(1, (len(data)+limit-1)//limit)
         return data[::stride] + ([data[-1]] if data[-1] is not data[::stride][-1] else [])
     return {"probes": [dict(r) for r in downsample(rows)],
             "router": [{"ts": r["ts"], "source":r["source"], **json.loads(r["payload"])} for r in downsample(metrics)],
-            "huawei": [json.loads(r['payload']) for r in downsample(list(reversed(huawei)))]}
+            "huawei": [json.loads(r['payload']) for r in downsample(huawei)],
+            "truncated":truncated,
+            "bounded_to_last":5000,
+            "downsampled":{kind:count>limit for kind,count in (
+                ('probes',len(rows)),('router',len(metrics)),('huawei',len(huawei)))},
+            "semantics":"bounded legacy preview; /api/archive pages preserve all retained observations"}
 
 
 def get_events(limit=120):
@@ -439,21 +454,33 @@ def passive_neighbors():
 
 
 def metrics_text():
-    status = get_status(); probe = status["probe"] or {}; mt = status["metrics"]["metrics"]
-    lines = ["# HELP fno_router_reachable Gateway web port TCP reachability", "# TYPE fno_router_reachable gauge",
-             f"fno_router_reachable {probe.get('router_online', 0)}",
-             "# HELP fno_external_probe_reachable External TCP/443 target reachability", "# TYPE fno_external_probe_reachable gauge",
-             f"fno_external_probe_reachable {probe.get('internet_online', 0)}"]
-    for source, target in (("router_ms", "fno_router_tcp_latency_ms"),("internet_ms", "fno_external_tcp_latency_ms")):
-        if probe.get(source) is not None:
-            lines.extend((f"# TYPE {target} gauge", f"{target} {probe[source]}"))
-    for source, target in (("cpu_pct","fno_huawei_cpu_percent"),("memory_pct","fno_huawei_memory_percent"),
-                           ("uptime_seconds","fno_huawei_uptime_seconds"),("optical_rx_dbm","fno_huawei_optical_rx_dbm"),
-                           ("wan_rx_bytes_total","fno_huawei_wan_rx_bytes_total"),("wan_tx_bytes_total","fno_huawei_wan_tx_bytes_total")):
-        if source in mt and isinstance(mt[source], (int, float)):
-            lines.extend((f"# TYPE {target} gauge", f"{target} {mt[source]}"))
+    status = get_status(); probe = status["probe"] or {}
+    router = status["metrics"];mt = router["metrics"]
+    def fresh(ts):
+        try:
+            age=(datetime.now(timezone.utc)-datetime.fromisoformat(ts)).total_seconds()
+            return -5<=age<=180
+        except (ValueError,TypeError,OverflowError):return False
+    lines = ["# HELP fno_router_reachable Gateway web port TCP reachability",
+             "# TYPE fno_router_reachable gauge",
+             "# HELP fno_external_probe_reachable External TCP/443 target reachability",
+             "# TYPE fno_external_probe_reachable gauge"]
+    if fresh(probe.get('ts')):
+        for source,target in (('router_online','fno_router_reachable'),('internet_online','fno_external_probe_reachable')):
+            if probe.get(source) in (0,1) and type(probe[source]) is int:
+                lines.append(f"{target} {probe[source]}")
+    if fresh(probe.get('ts')):
+        for source, target in (("router_ms", "fno_router_tcp_latency_ms"),("internet_ms", "fno_external_tcp_latency_ms")):
+            if type(probe.get(source)) in (int,float) and math.isfinite(probe[source]):
+                lines.extend((f"# TYPE {target} gauge", f"{target} {probe[source]}"))
+    if fresh(router.get('ts')):
+        for source, target in (("cpu_pct","fno_huawei_cpu_percent"),("memory_pct","fno_huawei_memory_percent"),
+                               ("uptime_seconds","fno_huawei_uptime_seconds"),("optical_rx_dbm","fno_huawei_optical_rx_dbm"),
+                               ("wan_rx_bytes_total","fno_huawei_wan_rx_bytes_total"),("wan_tx_bytes_total","fno_huawei_wan_tx_bytes_total")):
+            if type(mt.get(source)) in (int, float) and math.isfinite(mt[source]):
+                lines.extend((f"# TYPE {target} gauge", f"{target} {mt[source]}"))
     for d in status["devices"]:
-        if d["online"] is not None:
+        if d["online"] in (0,1) and type(d["online"]) is int and fresh(d.get('sampled_at')):
             label = d["ip"].replace('\\','\\\\').replace('"','\\"')
             lines.append(f'fno_device_reachable{{ip="{label}"}} {d["online"]}')
     return "\n".join(lines)+"\n"

@@ -21,7 +21,7 @@ class HttpTests(unittest.TestCase):
         core.DB_PATH=Path(cls.temp.name)/'test-http.db'
         core.init_db()
         cls.oldtoken=core.WRITE_TOKEN
-        core.WRITE_TOKEN='integration-test-token'
+        core.WRITE_TOKEN='integration-test-token-with-32-or-more-chars'
         cls.srv=ThreadingHTTPServer(('127.0.0.1',0),Handler)
         cls.url=f'http://127.0.0.1:{cls.srv.server_address[1]}'
         cls.thread=threading.Thread(target=cls.srv.serve_forever,daemon=True)
@@ -194,7 +194,41 @@ class HttpTests(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as e:
             self.request('/api/devices',{'name':'Test','ip':'192.168.1.90'})
         self.assertEqual(e.exception.code,401)
-        self.assertEqual(self.request('/api/devices',{'name':'Test','ip':'192.168.1.90'},'integration-test-token')[0],201)
+        self.assertEqual(self.request('/api/devices',{'name':'Test','ip':'192.168.1.90'},'integration-test-token-with-32-or-more-chars')[0],201)
+
+    def test_short_token_rejected_by_all_write_routes(self):
+        for path,payload in (('/api/devices',{'name':'Short token','ip':'192.168.1.190'}),
+                             ('/api/devices/delete',{'id':1234}),
+                             ('/api/ingest/router',{'metrics':{'cpu_pct':12}})):
+            with self.subTest(path=path),patch.object(core,'WRITE_TOKEN','short'), \
+                 self.assertRaises(urllib.error.HTTPError) as error:
+                self.request(path,payload,'short')
+            self.assertEqual(error.exception.code,403)
+
+    def test_simultaneous_raw_exports_are_bounded(self):
+        from app.server import EXPORT_SLOTS
+        for _ in range(4):
+            self.assertTrue(EXPORT_SLOTS.acquire(blocking=False))
+        try:
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                self.request('/api/v1/devices/020000000001/export.csv?period=24h')
+            self.assertEqual(error.exception.code,503)
+        finally:
+            for _ in range(4):EXPORT_SLOTS.release()
+
+    def test_head_export_sends_no_body(self):
+        from test_huawei import payload,fixture
+        from app.adapters import huawei_b7 as h
+        p=payload();_,p['stations'],_=h.parse_stations(fixture('stations'))
+        p['clients']=h.parse_clients(fixture('stations'),p['stations'])
+        core.put_huawei_sample(p)
+        request=urllib.request.Request(
+            self.url+'/api/v1/devices/020000000001/export.csv?period=24h',
+            method='HEAD')
+        with urllib.request.urlopen(request,timeout=HTTP_TIMEOUT) as response:
+            self.assertEqual(response.status,200)
+            self.assertEqual(response.read(),b'')
+            self.assertEqual(response.headers.get('Content-Type'),'text/csv; charset=utf-8')
 
     def test_rejects_unknown_path(self):
         with self.assertRaises(urllib.error.HTTPError) as e:self.request('/bad-path')

@@ -18,6 +18,8 @@ from . import core, request_timing
 
 STATIC = Path(__file__).resolve().parent / "static"
 VALT = STATIC.parent.parent / "sites" / "valt"
+# Avoid unbounded simultaneous long-running, read-only archive exports on S7.
+EXPORT_SLOTS = threading.BoundedSemaphore(4)
 
 # Disposable in-memory cache for public code only. No API or Vault files.
 @lru_cache(maxsize=16)
@@ -114,8 +116,8 @@ class Handler(BaseHTTPRequestHandler):
     def authenticate_write(self):
         """All mutations require FNO_INGEST_TOKEN, even on localhost."""
         token = core.WRITE_TOKEN
-        if not token:
-            self.error_json(403, "Escrita desativada. Define FNO_INGEST_TOKEN no ambiente e reinicia.")
+        if not token or len(token) < 32:
+            self.error_json(403, "Escrita desativada. Define FNO_INGEST_TOKEN com pelo menos 32 caracteres.")
             return False
         from hmac import compare_digest
         candidate = self.headers.get("X-API-Key", "")
@@ -257,7 +259,15 @@ class Handler(BaseHTTPRequestHandler):
             return self.error_json(500, "Internal error")
 
     def export_device(self,identifier,period,format_name):
-        """Stream every raw observation in the selected window, without a chart limit."""
+        """Bound simultaneous full exports; no raw observations are discarded."""
+        if not EXPORT_SLOTS.acquire(blocking=False):
+            return self.error_json(503, "Exportação ocupada; tente novamente.")
+        try:
+            return self._export_device_stream(identifier,period,format_name)
+        finally:
+            EXPORT_SLOTS.release()
+
+    def _export_device_stream(self,identifier,period,format_name):
         from .historian import device_mac,window,sample
         mac=device_mac(identifier);start,end=window(period)
         with core.connect() as db:
@@ -270,6 +280,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header('Content-Disposition',f'attachment; filename="faysk-{identifier}-{period}.{format_name.split(".")[-1]}"')
             self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff')
             self.send_header('Connection','close');self.end_headers();self.close_connection=True
+            if getattr(self,'_head_only',False):
+                return
             fields=('timestamp','online','rssi_dbm','snr_db','link_rx_phy_mbps','link_tx_phy_mbps','download_mbps','upload_mbps','latency_lan_ms','interface','source','quality','measurement_semantics','observation_json')
             def csv_line(values):
                 buf=io.StringIO();csv.writer(buf).writerow(values);self.wfile.write(buf.getvalue().encode('utf-8'))
@@ -297,8 +309,6 @@ class Handler(BaseHTTPRequestHandler):
             data = json.loads(self.rfile.read(size) or b"{}")
             path = urlsplit(self.path).path
             if path == '/api/ingest/huawei':
-                if len(core.WRITE_TOKEN) < 32:
-                    return self.error_json(403, 'Token de ingestão requer pelo menos 32 caracteres')
                 core.put_huawei_sample(data,historical=self.headers.get('X-FNO-Backfill')=='1')
                 return self.respond(201, {'ok': True})
             if path == "/api/ingest/router":

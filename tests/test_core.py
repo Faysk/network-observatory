@@ -1,6 +1,8 @@
 import json
 import tempfile
+import threading
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 from app import core
@@ -61,6 +63,9 @@ class CoreTests(unittest.TestCase):
     def test_router_metric_ingest_validation(self):
         with self.assertRaises(ValueError): core.put_router_metrics({'cpu_pct': 200}, 'test')
         with self.assertRaises(ValueError): core.put_router_metrics({'cpu_pct': True}, 'test')
+        for bad in (float('nan'),float('inf'),float('-inf')):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                core.put_router_metrics({'memory_pct':bad}, 'test')
         with self.assertRaises(ValueError): core.put_router_metrics({'garbage': 8}, 'test')
         row = core.put_router_metrics({'cpu_pct': 37, 'memory_pct': 13}, 'manual-authorized')
         self.assertEqual(row['cpu_pct'], 37)
@@ -92,7 +97,72 @@ class CoreTests(unittest.TestCase):
 
     def test_prometheus_omits_missing_router(self):
         result=core.metrics_text()
-        self.assertIn('fno_router_reachable',result)
+        self.assertIn('# TYPE fno_router_reachable gauge',result)
+        self.assertNotIn('fno_router_reachable 0',result)
         self.assertNotIn('fno_huawei_cpu_percent',result)
+
+    def test_prometheus_only_exports_fresh_observed_values(self):
+        current=datetime.now(timezone.utc).isoformat()
+        old=(datetime.now(timezone.utc)-timedelta(hours=2)).isoformat()
+        with core.connect() as db:
+            db.execute('INSERT INTO samples(ts,router_online,router_ms,internet_online,internet_ms) VALUES(?,?,?,?,?)',
+                       (old,0,None,1,4.5))
+            db.execute('INSERT INTO router_metrics(ts,source,payload) VALUES(?,?,?)',
+                       (old,'test',json.dumps({'cpu_pct':70})))
+        outdated=core.metrics_text()
+        self.assertNotIn('fno_router_reachable 0',outdated)
+        self.assertNotIn('fno_external_probe_reachable 1',outdated)
+        self.assertNotIn('fno_huawei_cpu_percent 70',outdated)
+        with core.connect() as db:
+            db.execute('INSERT INTO samples(ts,router_online,router_ms,internet_online,internet_ms) VALUES(?,?,?,?,?)',
+                       (current,0,12.0,1,4.5))
+            db.execute('INSERT INTO router_metrics(ts,source,payload) VALUES(?,?,?)',
+                       (current,'test',json.dumps({'cpu_pct':70})))
+        fresh=core.metrics_text()
+        self.assertIn('fno_router_reachable 0',fresh)
+        self.assertIn('fno_external_probe_reachable 1',fresh)
+        self.assertIn('fno_huawei_cpu_percent 70',fresh)
+
+    def test_slow_device_probe_does_not_lock_queries_or_resurrect_deleted_device(self):
+        core.add_device({'name':'Slow fixture','ip':'192.168.1.190','port':443})
+        entered=threading.Event();release=threading.Event();errors=[]
+        def slow_device(_row):
+            entered.set()
+            if not release.wait(3):raise TimeoutError('synthetic test timeout')
+            return True,5.0
+        def collect():
+            try:core.collect_once()
+            except Exception as exc:errors.append(exc)
+        with patch.object(core,'tcp_probe',side_effect=[(True,1.0),(True,3.0)]), \
+             patch.object(core,'probe_device',side_effect=slow_device):
+            worker=threading.Thread(target=collect)
+            worker.start()
+            try:
+                self.assertTrue(entered.wait(2),'synthetic probe was never entered')
+                query_done=threading.Event()
+                reader=threading.Thread(target=lambda:(core.get_status(),query_done.set()),daemon=True)
+                reader.start()
+                self.assertTrue(query_done.wait(1),'read API blocked behind slow probe')
+                core.delete_device(1)
+            finally:
+                release.set()
+                worker.join(3)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(errors,[])
+        with core.connect() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM device_samples').fetchone()[0],0)
+            self.assertEqual(db.execute('SELECT count(*) FROM samples').fetchone()[0],1)
+
+    def test_legacy_history_marks_truncation_and_downsampling(self):
+        now=datetime.now(timezone.utc).isoformat()
+        with core.connect() as db:
+            db.executemany('INSERT INTO samples(ts) VALUES(?)',[(now,)]*5002)
+        result=core.get_history(24,limit=9)
+        self.assertTrue(result['truncated']['probes'])
+        self.assertEqual(result['bounded_to_last'],5000)
+        self.assertTrue(result['downsampled']['probes'])
+        self.assertLessEqual(len(result['probes']),10)
+        self.assertEqual(result['router'],[])
+        self.assertFalse(result['truncated']['router'])
 
 if __name__ == '__main__': unittest.main()
