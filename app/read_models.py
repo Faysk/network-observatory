@@ -14,8 +14,10 @@ HOST_EXPRESSIONS = {
     'rx': "CASE WHEN json_type(payload,'$.network.rxMbps') IN ('integer','real') AND json_extract(payload,'$.network.rxMbps')>=0 THEN json_extract(payload,'$.network.rxMbps') END",
     'tx': "CASE WHEN json_type(payload,'$.network.txMbps') IN ('integer','real') AND json_extract(payload,'$.network.txMbps')>=0 THEN json_extract(payload,'$.network.txMbps') END",
     'battery': "CASE WHEN json_type(payload,'$.battery.levelPercent') IN ('integer','real') AND json_extract(payload,'$.battery.levelPercent') BETWEEN 0 AND 100 THEN json_extract(payload,'$.battery.levelPercent') END",
-    'temp': "json_extract(payload,'$.battery.temperatureC')",
-    'latency': "json_extract(payload,'$.network.latencyMs')",
+    # SQLite AVG(text) silently coerces nonnumeric strings to 0. Keep invalid
+    # sensor readings NULL; do not fabricate zero degrees or milliseconds.
+    'temp': "CASE WHEN json_type(payload,'$.battery.temperatureC') IN ('integer','real') AND json_extract(payload,'$.battery.temperatureC') BETWEEN -100 AND 200 THEN json_extract(payload,'$.battery.temperatureC') END",
+    'latency': "CASE WHEN json_type(payload,'$.network.latencyMs') IN ('integer','real') AND json_extract(payload,'$.network.latencyMs') BETWEEN 0 AND 1000000 THEN json_extract(payload,'$.network.latencyMs') END",
     'storage': "(SELECT 100.0*json_extract(v.value,'$.usedGB')/nullif(json_extract(v.value,'$.totalGB'),0) FROM json_each(payload,'$.storage') v WHERE json_extract(v.value,'$.id')='internal' AND json_type(v.value,'$.usedGB') IN ('integer','real') AND json_type(v.value,'$.totalGB') IN ('integer','real') AND json_extract(v.value,'$.usedGB') BETWEEN 0 AND json_extract(v.value,'$.totalGB') LIMIT 1)",
 }
 
@@ -52,7 +54,7 @@ def init_host(db):
     columns = ','.join('"'+name+'"' for name in HOST_EXPRESSIONS)
     db.execute('SAVEPOINT chart_schema')
     try:
-        db.execute('CREATE TABLE IF NOT EXISTS host_chart_points(ts REAL PRIMARY KEY,'+columns+',projection_version INTEGER NOT NULL DEFAULT 2) WITHOUT ROWID')
+        db.execute('CREATE TABLE IF NOT EXISTS host_chart_points(ts REAL PRIMARY KEY,'+columns+',projection_version INTEGER NOT NULL DEFAULT 3) WITHOUT ROWID')
         if not any(row[1]=='projection_version' for row in db.execute('PRAGMA table_info(host_chart_points)')):
             db.execute('ALTER TABLE host_chart_points ADD COLUMN projection_version INTEGER NOT NULL DEFAULT 1')
         for operation in ('DELETE', 'UPDATE'):
@@ -67,7 +69,7 @@ def init_host(db):
 def project_host(db, stamp):
     columns = ','.join('"'+name+'"' for name in HOST_EXPRESSIONS)
     db.execute('INSERT OR REPLACE INTO host_chart_points(ts,'+columns+',projection_version) SELECT ts,'+
-               ','.join(HOST_EXPRESSIONS.values())+',2 FROM host_samples WHERE ts=?', (stamp,))
+               ','.join(HOST_EXPRESSIONS.values())+',3 FROM host_samples WHERE ts=?', (stamp,))
 
 
 def query_host(db, cutoff, bucket, until=None):
@@ -76,9 +78,9 @@ def query_host(db, cutoff, bucket, until=None):
     values = ','.join('"'+name+'"' for name in names)
     averages = ','.join('AVG("'+name+'")' for name in names)
     if exists(db, 'host_chart_points') and any(row[1]=='projection_version' for row in db.execute('PRAGMA table_info(host_chart_points)')):
-        source = ('SELECT ts,'+values+' FROM host_chart_points WHERE ts>=? AND ts<=? AND projection_version=2 UNION ALL '
+        source = ('SELECT ts,'+values+' FROM host_chart_points WHERE ts>=? AND ts<=? AND projection_version=3 UNION ALL '
                   'SELECT ts,'+','.join(HOST_EXPRESSIONS.values())+' FROM host_samples r '
-                  'WHERE ts>=? AND ts<=? AND NOT EXISTS(SELECT 1 FROM host_chart_points p WHERE p.ts=r.ts AND p.projection_version=2)')
+                  'WHERE ts>=? AND ts<=? AND NOT EXISTS(SELECT 1 FROM host_chart_points p WHERE p.ts=r.ts AND p.projection_version=3)')
         parameters = (cutoff, until, cutoff, until, bucket)
     else:
         source = ('SELECT ts,'+','.join(expression+' AS "'+name+'"' for name, expression in HOST_EXPRESSIONS.items())+
@@ -255,7 +257,7 @@ def backfill_host(db, batch=32, cursors=None):
     init_host(db)
     after = cursors.get('host', -1e300) if cursors is not None else -1e300
     rows = db.execute('SELECT ts FROM host_samples r WHERE ts>? AND NOT EXISTS('
-                      'SELECT 1 FROM host_chart_points p WHERE p.ts=r.ts AND p.projection_version=2) ORDER BY ts LIMIT ?', (after, batch)).fetchall()
+                      'SELECT 1 FROM host_chart_points p WHERE p.ts=r.ts AND p.projection_version=3) ORDER BY ts LIMIT ?', (after, batch)).fetchall()
     for row in rows:
         project_host(db, row[0])
     if rows and cursors is not None:
