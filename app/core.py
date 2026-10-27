@@ -379,7 +379,7 @@ def get_status():
                   "collector": dict(COLLECTOR_STATE),
                   "event_count": counts, "server_time": utcnow(),
                   "poll_interval_seconds": INTERVAL, "retention_days": RETENTION_DAYS, "retention_unlimited": RETENTION_DAYS==0,
-                  "methodology": {"router": "TCP/80 para a interface web", "internet": "TCP/443 para 1.1.1.1", "device": "ICMP ou porta TCP configurado"}}
+                  "methodology": {"router": "TCP/80 para a interface web", "internet": "TCP/443 para 1.1.1.1", "device": "ICMP ou porta TCP configurada"}}
     # Filesystem enumeration can take arbitrarily long with a large backlog.
     # It is independent of the SQLite snapshot: never hold the global writer
     # lock (or DB transaction) while traversing the microSD queue folders.
