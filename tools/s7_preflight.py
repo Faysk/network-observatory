@@ -5,6 +5,7 @@ read-only schema probes. Output deliberately excludes paths, IPs, MACs and
 sample payloads. It is NOT an integrity-check or hardware certification.
 """
 import argparse
+from contextlib import closing
 import json
 import os
 import shutil
@@ -28,7 +29,7 @@ def sqlite_readonly(path):
         return check('sqlite','fail','Database file is missing')
     try:
         uri=path.resolve().as_uri()+'?mode=ro'
-        with sqlite3.connect(uri,uri=True,timeout=2) as db:
+        with closing(sqlite3.connect(uri,uri=True,timeout=2)) as db:
             db.execute('PRAGMA query_only=ON')
             table=db.execute("SELECT 1 FROM sqlite_master WHERE type='table' LIMIT 1").fetchone()
         if table is None:
