@@ -116,6 +116,11 @@ class HostProjectionTests(unittest.TestCase):
                        (self.now,'unavailable','timeout'))
         self.assertEqual(self.query()[0][temp_index],20)
         self.assertEqual(self.query()[0][latency_index],60)
+        # User-facing endpoint must carry the corrected mean, not only SQL.
+        self.assertEqual(next(point['value'] for point in self.monitor.history('temp','24h')
+                              if point['value'] is not None),20)
+        self.assertEqual(next(point['value'] for point in self.monitor.history('latency','24h')
+                              if point['value'] is not None),60)
         self.assertEqual(rebuild(self.monitor.path,'host'),8)
         self.assertEqual(self.query()[0][temp_index],20)
         self.assertEqual(self.query()[0][latency_index],60)
