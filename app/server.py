@@ -21,6 +21,8 @@ STATIC = Path(__file__).resolve().parent / "static"
 VALT = STATIC.parent.parent / "sites" / "valt"
 # Avoid unbounded simultaneous long-running, read-only archive exports on S7.
 EXPORT_SLOTS = threading.BoundedSemaphore(4)
+# ThreadingHTTPServer spawns a thread per connection; cap expensive API reads.
+API_READ_SLOTS = threading.BoundedSemaphore(24)
 
 def parse_read_cidrs(raw):
     """Explicit local-network grants; never accept public or internet-wide ACLs."""
@@ -175,6 +177,16 @@ class Handler(BaseHTTPRequestHandler):
         if not source_allowed(self.client_address[0]):
             return self.error_json(403, 'Leitura não autorizada nesta origem')
         path = urlsplit(self.path)
+        if path.path.startswith('/api/') or path.path == '/metrics':
+            if not API_READ_SLOTS.acquire(blocking=False):
+                return self.error_json(503, 'Capacidade de leituras ocupada; tente novamente.')
+            try:
+                return self._route_read(path)
+            finally:
+                API_READ_SLOTS.release()
+        return self._route_read(path)
+
+    def _route_read(self,path):
         if path.scheme or path.netloc:
             return self.error_json(403, 'Proxy requests are not supported')
         try:
