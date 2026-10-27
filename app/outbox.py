@@ -34,9 +34,21 @@ class Outbox:
             except (ValueError,TypeError,KeyError,UnicodeError):
                 rejected=self.path/'quarantine'
                 rejected.mkdir(mode=0o700,exist_ok=True)
-                # The path stays on the same configured volume: atomic rename,
-                # no data loss and no fallback to Android internal storage.
-                path.replace(rejected/path.name)
+                # Never replace an existing quarantined sample with the same
+                # basename. mkdir is exclusive, including between processes.
+                # The rename is on the same configured volume; a failed move
+                # leaves the original queue file unacknowledged.
+                for _ in range(12):
+                    unique=rejected/uuid.uuid4().hex
+                    try:unique.mkdir(mode=0o700)
+                    except FileExistsError:continue
+                    try:path.rename(unique/path.name)
+                    except OSError:
+                        try:unique.rmdir()
+                        except OSError:pass
+                        raise
+                    break
+                else:raise OSError('quarantine_slot_collision')
                 self.last_quarantined+=1
                 continue
             send(payload)
@@ -47,4 +59,4 @@ class Outbox:
     def pending(self):return sum(1 for _ in self.path.glob('*.json'))
     def quarantined(self):
         folder=self.path/'quarantine'
-        return sum(1 for _ in folder.glob('*.json')) if folder.is_dir() else 0
+        return sum(1 for _ in folder.rglob('*.json')) if folder.is_dir() else 0

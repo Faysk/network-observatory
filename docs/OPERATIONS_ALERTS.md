@@ -10,7 +10,7 @@ reenvio de dados pessoais.
 O coletor guarda as recolhas num outbox local, no mesmo volume configurado
 para `FNO_DB`. Se um arquivo `.json` da fila estiver ilegível, tiver UTF-8
 inválido ou não cumprir o schema estrito, **os bytes originais são movidos**
-para `outbox/quarantine/<nome-original>.json`. Não há limpeza automática,
+para `outbox/quarantine/<id-único>/<nome-original>.json`. Não há limpeza automática,
 reescrita do conteúdo ou cópia para o armazenamento interno do Android.
 
 A API `/api/status` informa `recording.pending_samples` e
@@ -179,3 +179,20 @@ depois; testar queda de recolha e ausência de uma fonte com fixtures sem
 desmontar o microSD de produção; manter rollback do código anterior. Esta
 entrega não executa essas etapas. Os dados históricos brutos continuam no
 lugar; não há migração SQLite.
+
+## Integridade de exportações CSV e da quarentena
+
+A quarentena nunca substitui outro item com o mesmo nome. Cada item inválido
+é deslocado para uma **pasta privada criada exclusivamente** dentro da
+quarentena, preservando bytes e nome original, sem criar cópias no
+armazenamento interno. Falha ao criar/deslocar o item deixa a origem pendente,
+sem apagar o arquivo nem informar ingestão bem-sucedida.
+
+Os CSVs de eventos e de dossiês de dispositivos neutralizam texto
+controlado pelo exterior que poderia ser interpretado como fórmula por
+planilhas (por exemplo, prefixos `=`, `+`, `@` ou `-`, mesmo precedidos
+de espaços de controlo). Nesse caso, a célula é prefixada com apóstrofo
+literal. Esta neutralização **não altera** os JSONs, observações brutas ou
+conteúdo guardado em SQLite. A exportação CSV é uma vista de conveniência;
+o JSON/arquivo original mantém o texto exato.
+

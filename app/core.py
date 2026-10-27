@@ -379,7 +379,7 @@ def get_status():
                 "collector": dict(COLLECTOR_STATE),
                 "event_count": counts, "server_time": utcnow(),
                 "poll_interval_seconds": INTERVAL, "retention_days": RETENTION_DAYS, "retention_unlimited": RETENTION_DAYS==0,
-                "recording": {"pending_samples":sum(1 for _ in (DB_PATH.parent/"outbox").glob("*.json")),"quarantined_samples":sum(1 for _ in (DB_PATH.parent/"outbox"/"quarantine").glob("*.json")),"durable_queue":True},
+                "recording": {"pending_samples":sum(1 for _ in (DB_PATH.parent/"outbox").glob("*.json")),"quarantined_samples":sum(1 for _ in (DB_PATH.parent/"outbox"/"quarantine").rglob("*.json")),"durable_queue":True},
                 "methodology": {"router": "TCP/80 para a interface web", "internet": "TCP/443 para 1.1.1.1", "device": "ICMP ou porta TCP configurada"}}
 
 

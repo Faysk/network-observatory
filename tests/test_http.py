@@ -191,6 +191,28 @@ class HttpTests(unittest.TestCase):
                     self.assertIn(error.exception.code,(403,404))
         self.assertEqual(self.request('/router/')[2]['X-Frame-Options'],'DENY')
 
+    def test_csv_export_untrusted_cells_never_become_spreadsheet_formulas(self):
+        import csv,io
+        from app.server import safe_csv_cell
+        for raw in ('=1+2','+cmd','-5+9','@SUM(1)','  =HYPERLINK(1)',
+                    '\t+2','\r=3','\ufeff=5','\u200b@A1'):
+            with self.subTest(raw=raw):
+                self.assertEqual(safe_csv_cell(raw),"'"+raw)
+        for ordinary in ('Sensor OK','Device = gateway','',None,17):
+            self.assertEqual(safe_csv_cell(ordinary),ordinary)
+        with core.connect() as db:
+            db.execute('INSERT INTO events(ts,severity,category,title,detail,source) VALUES(?,?,?,?,?,?)',
+                      ('2026-10-27T12:00:00+00:00','info','synthetic',
+                       '=HYPERLINK("https://example.invalid")',' normal','+cmd'))
+        status,data,headers=self.request('/api/export/events.csv')
+        self.assertEqual(status,200)
+        rows=list(csv.DictReader(io.StringIO(data.decode('utf-8-sig'))))
+        row=next(item for item in rows if item['category']=='synthetic')
+        self.assertTrue(row['title'].startswith("'=HYPERLINK"))
+        self.assertEqual(row['source'],"'+cmd")
+        self.assertEqual(row['detail'],' normal')
+        self.assertEqual(headers['Cache-Control'],'no-store')
+
     def test_basic_assets_and_api(self):
         code,body,_=self.request('/api/status');self.assertEqual(code,200)
         self.assertIn('router',json.loads(body))
