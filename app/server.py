@@ -125,8 +125,42 @@ def _accepts_gzip(value):
 
 
 
+class BoundedHTTPServer(ThreadingHTTPServer):
+    """Cap ALL HTTP workers, including incomplete/slow-header connections."""
+    daemon_threads=True
+
+    def __init__(self,server_address,handler_class,bind_and_activate=True,connection_limit=32):
+        if not 1<=connection_limit<=128:
+            raise ValueError('Invalid HTTP connection limit')
+        self._connection_slots=threading.BoundedSemaphore(connection_limit)
+        super().__init__(server_address,handler_class,bind_and_activate=bind_and_activate)
+
+    def process_request(self,request,client_address):
+        if not self._connection_slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request,client_address)
+        except BaseException:
+            # If thread creation fails, no worker exists to release the slot.
+            self._connection_slots.release()
+            raise
+
+    def process_request_thread(self,request,client_address):
+        try:
+            super().process_request_thread(request,client_address)
+        finally:
+            self._connection_slots.release()
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "FayskNOC/0.1"
+
+    def setup(self):
+        super().setup()
+        # Bound idle/partial headers, stalled request bodies and slow writes.
+        # This is per-I/O inactivity, not a maximum file-transfer duration.
+        self.connection.settimeout(30)
 
     def respond(self, code, data, mime="application/json; charset=utf-8"):
         # Large static/Vault files must never be materialized in the S7's RAM.
@@ -161,14 +195,18 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Security-Policy", "default-src 'self' data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; frame-src 'self' data: blob:; object-src 'self' data: blob:; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'" if urlsplit(self.path).path.startswith("/valt/") else "default-src 'self'; img-src 'self' data:; style-src 'self'" + style_policy + "; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
         self.end_headers()
         if not getattr(self,'_head_only',False):
-            if from_file:
-                with data.open('rb') as stream:
-                    while True:
-                        chunk=stream.read(64*1024)
-                        if not chunk:break
-                        self.wfile.write(chunk)
-            else:
-                self.wfile.write(body)
+            try:
+                if from_file:
+                    with data.open('rb') as stream:
+                        while True:
+                            chunk=stream.read(64*1024)
+                            if not chunk:break
+                            self.wfile.write(chunk)
+                else:
+                    self.wfile.write(body)
+            except (BrokenPipeError,ConnectionResetError,TimeoutError):
+                # Headers are already sent; never append an unrelated 500.
+                self.close_connection=True
 
     def static_code(self, target, mime):
         stat=target.stat()
@@ -428,8 +466,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(csv_text.getvalue().encode('utf-8'))
                 cursor=records[-1]['id']
                 remaining-=len(records)
-        except (BrokenPipeError,ConnectionResetError):
-            # Client went away: no retry or mutation and no second HTTP response.
+        except (BrokenPipeError,ConnectionResetError,TimeoutError):
+            # Client went away/stalled: no retry or second HTTP response.
             self.close_connection=True
 
     def export_device(self,identifier,period,format_name):
@@ -488,7 +526,7 @@ class Handler(BaseHTTPRequestHandler):
                     first=False
                 cursor_ts,cursor_id=rows[-1]['ts'],rows[-1]['id']
             if not is_csv:self.wfile.write(b']')
-        except (BrokenPipeError,ConnectionResetError):
+        except (BrokenPipeError,ConnectionResetError,TimeoutError):
             self.close_connection=True
 
     def do_POST(self):
@@ -537,7 +575,7 @@ def main():
     stop = threading.Event()
     worker = threading.Thread(target=core.collector_loop, args=(stop,), daemon=True)
     worker.start()
-    server = ThreadingHTTPServer((args.host, args.port), Handler)
+    server = BoundedHTTPServer((args.host, args.port), Handler)
     from . import host_telemetry
     host_telemetry.start(core.DB_PATH, args.port)
     print(f"Faysk NOC running at http://{args.host}:{args.port} (interval {core.INTERVAL}s)")
