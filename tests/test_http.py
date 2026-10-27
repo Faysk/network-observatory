@@ -213,6 +213,48 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(row['detail'],' normal')
         self.assertEqual(headers['Cache-Control'],'no-store')
 
+    def test_events_csv_streams_in_pages_with_expected_count_and_head(self):
+        import csv,io
+        from app import core as module_core
+        count=1107
+        timestamp='2026-10-27T12:00:00+00:00'
+        with core.connect() as db:
+            previous=db.execute('SELECT COUNT(*) FROM events').fetchone()[0]
+            db.executemany(
+                'INSERT INTO events(ts,severity,category,title,detail,source) VALUES(?,?,?,?,?,?)',
+                [(timestamp,'info','bulk-synthetic','Event '+str(i),'synthetic','test') for i in range(count)])
+        with patch.object(module_core,'get_events',side_effect=AssertionError('must stream, not materialize')):
+            status,data,headers=self.request('/api/export/events.csv')
+        self.assertEqual(status,200)
+        self.assertTrue(data.startswith(bytes.fromhex('efbbbf')))
+        self.assertIn('attachment;',headers.get('Content-Disposition',''))
+        self.assertEqual(headers.get('X-FNO-Export-Expected-Rows'),str(previous+count))
+        self.assertEqual(headers.get('X-FNO-Export-Truncated'),'false')
+        rows=list(csv.DictReader(io.StringIO(data.decode('utf-8-sig'))))
+        self.assertEqual(len(rows),previous+count)
+        ids=[int(row['id']) for row in rows]
+        self.assertEqual(ids,sorted(ids,reverse=True))
+        bulk=[row for row in rows if row['category']=='bulk-synthetic']
+        self.assertEqual(len(bulk),count)
+        self.assertEqual({row['title'] for row in bulk},
+                         {'Event '+str(i) for i in range(count)})
+        head=urllib.request.Request(self.url+'/api/export/events.csv',method='HEAD')
+        with urllib.request.urlopen(head,timeout=HTTP_TIMEOUT) as response:
+            self.assertEqual(response.status,200)
+            self.assertEqual(response.read(),b'')
+            self.assertEqual(response.headers.get('X-FNO-Export-Expected-Rows'),str(previous+count))
+        from app.server import EXPORT_SLOTS
+        held=0
+        try:
+            for _ in range(4):
+                self.assertTrue(EXPORT_SLOTS.acquire(blocking=False))
+                held+=1
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                self.request('/api/export/events.csv')
+            self.assertEqual(error.exception.code,503)
+        finally:
+            for _ in range(held):EXPORT_SLOTS.release()
+
     def test_basic_assets_and_api(self):
         code,body,_=self.request('/api/status');self.assertEqual(code,200)
         self.assertIn('router',json.loads(body))
