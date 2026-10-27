@@ -345,12 +345,7 @@ class Handler(BaseHTTPRequestHandler):
             if path.path == "/api/neighbors": return self.respond(200, core.passive_neighbors())
             if path.path == "/metrics": return self.respond(200, core.metrics_text(), "text/plain; version=0.0.4; charset=utf-8")
             if path.path == "/api/export/events.csv":
-                events = core.get_events(limit=100000)
-                f = io.StringIO(); w = csv.DictWriter(f, fieldnames=["id","ts","severity","category","title","detail","source"])
-                w.writeheader()
-                for event in events:
-                    w.writerow({key:safe_csv_cell(value) for key,value in event.items()})
-                return self.respond(200, "\ufeff"+f.getvalue(), "text/csv; charset=utf-8")
+                return self.export_events()
             relative = "index.html" if path.path in ("", "/router/") else "s7/index.html" if path.path == "/s7/" else path.path[len("/router/"):] if path.path.startswith("/router/") else path.path.lstrip("/")
             if ".." in Path(relative).parts: return self.error_json(403, "Invalid path")
             fpath = (STATIC / relative).resolve()
@@ -365,6 +360,62 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             print("Request failure:", repr(exc))
             return self.error_json(500, "Internal error")
+
+    def export_events(self):
+        """Stream bounded events CSV without buffering the whole archive in RAM."""
+        if not EXPORT_SLOTS.acquire(blocking=False):
+            return self.error_json(503, 'Exportação ocupada; tente novamente.')
+        try:
+            return self._stream_events_csv()
+        finally:
+            EXPORT_SLOTS.release()
+
+    def _stream_events_csv(self):
+        fields=('id','ts','severity','category','title','detail','source')
+        cap=100000
+        batch=1000
+        # A short read obtains a stable upper ID and an expected row count.
+        # Later batches close their read transaction before sending bytes,
+        # preventing a slow client from pinning a WAL snapshot on microSD.
+        with core.connect() as db:
+            row=db.execute('SELECT COALESCE(MAX(id),0),COUNT(*) FROM events').fetchone()
+            watermark,total=row[0],row[1]
+        expected=min(cap,total)
+        self.send_response(200)
+        self.send_header('Content-Type','text/csv; charset=utf-8')
+        self.send_header('Content-Disposition','attachment; filename="faysk-events.csv"')
+        self.send_header('Cache-Control','no-store')
+        self.send_header('X-Content-Type-Options','nosniff')
+        self.send_header('X-Frame-Options','DENY')
+        self.send_header('X-FNO-Export-Expected-Rows',str(expected))
+        self.send_header('X-FNO-Export-Truncated','true' if total>cap else 'false')
+        self.send_header('Connection','close')
+        self.end_headers()
+        self.close_connection=True
+        if getattr(self,'_head_only',False):return
+        try:
+            self.wfile.write(b'\xef\xbb\xbf')
+            header=io.StringIO()
+            csv.DictWriter(header,fieldnames=fields).writeheader()
+            self.wfile.write(header.getvalue().encode('utf-8'))
+            cursor=watermark+1
+            remaining=expected
+            while remaining:
+                with core.connect() as db:
+                    records=db.execute('SELECT id,ts,severity,category,title,detail,source '
+                                       'FROM events WHERE id<? ORDER BY id DESC LIMIT ?',
+                                       (cursor,min(batch,remaining))).fetchall()
+                if not records:break
+                csv_text=io.StringIO()
+                writer=csv.DictWriter(csv_text,fieldnames=fields)
+                for record in records:
+                    writer.writerow({key:safe_csv_cell(record[key]) for key in fields})
+                self.wfile.write(csv_text.getvalue().encode('utf-8'))
+                cursor=records[-1]['id']
+                remaining-=len(records)
+        except (BrokenPipeError,ConnectionResetError):
+            # Client went away: no retry or mutation and no second HTTP response.
+            self.close_connection=True
 
     def export_device(self,identifier,period,format_name):
         """Bound simultaneous full exports; no raw observations are discarded."""
