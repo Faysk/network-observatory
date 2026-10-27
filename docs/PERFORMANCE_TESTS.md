@@ -2,6 +2,25 @@
 
 A suíte `tools/performance_matrix.py` dá uma identidade estável a cada consulta. Cada resultado informa contrato funcional, tempo de consulta/resposta, serialização, validação, CPU da thread, bytes e dispersão. HTTP ainda separa TTFB, transferência e parse. Os relatórios JSON permitem comparar versões; o Markdown ordena os casos mais lentos primeiro.
 
+## Controles de capacidade HTTP (auditoria 27/10/2026)
+
+As chamadas `GET/HEAD` a `/api/*` e `/metrics` compartilham no máximo
+**24 slots ativos** em todo o processo. Sob saturação recebem HTTP 503
+imediatamente, sem abrir novas consultas de banco e sem iniciar esperas
+ilimitadas. Assets estáticos não usam esses slots; os caches e semáforos
+próprios dos históricos continuam iguais.
+
+Exportações completas de dispositivos usam adicionalmente **4 slots**;
+quando os quatro estiverem ocupados, novos pedidos recebem 503. Uma
+exportação iniciada continua sem limite artificial de linhas e o semáforo
+é sempre libertado (inclusive em erro). O cliente deve aguardar e tentar
+novamente; HTTP 503 **não** significa ausência de dados.
+
+Esse limite não substitui testes de 24h em microSD, p95 sob vários clientes,
+verificação de navegador Android 8 nem quotas do sistema operativo. É uma
+proteção básica contra concorrência acidental na LAN permitida, não uma
+solução completa de DDoS nem de autenticação.
+
 ## Cobertura
 
 - Router: status, inventário, overview resumo/completo e dossiê em 1h/6h/12h/24h/7d/1m/1y.
