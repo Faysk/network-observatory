@@ -49,3 +49,35 @@ GitHub Actions (Linux/Python 3.12), 900 amostras Huawei fictícias + 900 sondas,
 - [ ] Provocar delays, falhas 500 e desconexões apenas em fixture de homologação, não desligar nem modificar router/serviço real; repetir período rápido e inspeção/teclado/aba oculta.
 - [ ] Auditar acessibilidade, redução de movimento, foco, INP, LCP, long tasks >50ms e eventuais quedas de FPS em dispositivo físico.
 - [ ] Rever permissões/rede antes de abrir o servidor fora de loopback: APIs GET não têm autenticação nativa, manter autenticação/TLS na borda.
+
+## Pré-teste local conservador (antes da homologação física)
+
+Executar no próprio S7/Termux, com Python instalado e caminhos **já
+conhecidos**, sem copiar um endereço ou diretório presumido:
+
+```sh
+python tools/s7_preflight.py --router-db /CAMINHO_REAL/observatory.db --host-db /CAMINHO_REAL/host-telemetry.db --origin http://127.0.0.1:8765
+```
+
+O utilitário só consulta o endpoint **local** `/api/status` (até 2 MiB,
+4 s), o espaço livre do sistema interno e o esquema mínimo dos SQLite por
+conexões abertas em `mode=ro` com `PRAGMA query_only`. Não faz login no
+Huawei, não lê arquivos de credenciais, não transmite históricos, não chama
+servidores externos e não imprime caminhos, IPs, MACs ou payloads.
+Também rejeita URL HTTPS, domínio remoto, redirecionamentos e URLs com
+credenciais: a validação exige `http://127.0.0.1:PORTA`, `localhost` ou
+`[::1]`. Pode executar somente as verificações locais usando `--skip-api`.
+
+Códigos de saída: **0** para as verificações concluídas sem ressalvas,
+**2** para verificação incompleta/avisos e **1** para falha. A saída JSON
+mostra somente resultados e códigos de critérios. O aviso de volume compara
+identificadores de montagem e **não comprova fisicamente** a presença de um
+microSD. O SQLite faz um teste leve de leitura de esquema, **não**
+`integrity_check` nem backup integral. Conforme o estado do WAL, o próprio
+SQLite pode precisar de ficheiros de controlo laterais; não interpretar
+`mode=ro` como garantia de ausência absoluta de acesso aos sidecars.
+
+O relatório é um **pré-teste**, nunca uma certificação de 24 h de operação,
+latência p95, bateria/temperatura, usabilidade Android nem confirmação da
+separação microSD/interno. Essas etapas continuam pendentes nas issues
+#52 e #53. A execução não instala a versão do GitHub no aparelho.
