@@ -21,6 +21,30 @@ verificação de navegador Android 8 nem quotas do sistema operativo. É uma
 proteção básica contra concorrência acidental na LAN permitida, não uma
 solução completa de DDoS nem de autenticação.
 
+## CSV de eventos — exportação em fluxo
+
+A rota `/api/export/events.csv` mantém o contrato de **até 100.000 eventos
+mais recentes**, ordenados por `id DESC`, mas deixa de criar uma lista
+Python e um CSV gigante em RAM. O servidor fixa um limite superior de ID,
+obtém a contagem inicial e processa blocos de até 1.000 eventos por transação
+SQLite curta. O socket envia as linhas progressivamente, sem manter uma
+transação WAL aberta durante a espera pelo consumidor.
+
+A resposta inclui `X-FNO-Export-Expected-Rows` (registros que devem constar
+no CSV) e `X-FNO-Export-Truncated` (se o arquivo ultrapassa 100.000 no
+início da exportação). O cliente pode verificar a contagem antes de confiar
+num CSV transferido por HTTP/1.0 sem Content-Length. Ingestões concorrentes
+posteriores ao limite superior não são adicionadas à exportação; remoções
+concorrentes podem resultar num arquivo com menos linhas que o cabeçalho
+esperava. Não chamar esse arquivo de snapshot transacional perfeito sob
+mutações simultâneas.
+
+Conexão fechada é o delimitador da resposta. A rota compartilha os quatro
+slots de exportação existentes e devolve HTTP 503 quando ocupados. HEAD
+devolve metadados sem transferir CSV. A formatação protege texto não
+confiável contra interpretação como fórmulas em planilhas; o banco e JSON
+originais não sofrem alterações.
+
 ## Cobertura
 
 - Router: status, inventário, overview resumo/completo e dossiê em 1h/6h/12h/24h/7d/1m/1y.
