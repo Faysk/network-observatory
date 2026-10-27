@@ -58,7 +58,7 @@ class Buckets:
                 item['count']+=1;item['sum']+=value
                 item['min']=value if item['min'] is None else min(item['min'],value)
                 item['max']=value if item['max'] is None else max(item['max'],value)
-                if target is bucket['values']:
+                if target is bucket['values'] and key in ('rssi_24_dbm','rssi_5_dbm'):
                     # Metric-specific timestamps prevent a sparse Wi-Fi band
                     # from losing legitimate adjacent segments. Missing readings
                     # never gain an invented value or time.
