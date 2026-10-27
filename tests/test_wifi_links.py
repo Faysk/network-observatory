@@ -29,6 +29,33 @@ class WifiEvidenceTests(unittest.TestCase):
                          [{"interface":"wlan5","band":None,"channel":None}])
         self.assertEqual(station_links([{"interface":"wlan5"}],{"wlan5":{"band":"6GHz","channel":5}})[0]["band"],None)
 
+    def test_signal_means_exclude_malformed_and_unavailable_values(self):
+        from app.historian import sample
+        payload={'stations':[
+            {'interface':'wlan1','rssi_dbm':-65,'snr_db_reported':0,
+             'rx_link_mbps':0,'tx_link_mbps':300},
+            {'interface':'wlan5','rssi_dbm':-55},
+            {'interface':'wlan2','rssi_dbm':'unknown'},
+            {'interface':'wlan3','rssi_dbm':True},
+            {'interface':'wlan4','rssi_dbm':900},
+            {'interface':'wlan6','rssi_dbm':float('inf')}]}
+        self.assertEqual(read_models.overview_point(payload)['rssi_dbm'],-60)
+        self.assertIsNone(read_models.overview_point(
+            {'stations':[{'rssi_dbm':'-60'},{'rssi_dbm':False}]} )['rssi_dbm'])
+        single=sample('2026-10-27T12:00:00+00:00',
+                      {'reported_status':'Online','stations':[{'rssi_dbm':True,
+                         'snr_db_reported':'unknown','rx_link_mbps':float('inf'),
+                         'tx_link_mbps':-1}]})
+        self.assertIsNone(single['rssi_dbm'])
+        self.assertIsNone(single['snr_db'])
+        self.assertIsNone(single['link_rx_phy_mbps'])
+        self.assertIsNone(single['link_tx_phy_mbps'])
+        legitimate=sample('2026-10-27T12:00:00+00:00',payload)
+        self.assertEqual(legitimate['rssi_dbm'],-65)
+        self.assertEqual(legitimate['snr_db'],0)
+        self.assertEqual(legitimate['link_rx_phy_mbps'],0)
+        self.assertEqual(legitimate['link_tx_phy_mbps'],300)
+
     def test_raw_fallback_and_compact_projections_match_after_refresh(self):
         with tempfile.TemporaryDirectory() as temp, patch.object(core,"DB_PATH",Path(temp)/"router.db"):
             core.init_db()
