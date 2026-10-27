@@ -27,7 +27,7 @@ API_READ_SLOTS = threading.BoundedSemaphore(24)
 
 def safe_csv_cell(value):
     """Keep spreadsheet exports as text, not a formula from an untrusted field."""
-    if isinstance(value,str) and re.match(r'^[\\s\\u200b\\ufeff\\x00-\\x1f]*[=+@-]',value):
+    if isinstance(value,str) and re.match(r'^[\s\u200b\ufeff\x00-\x1f]*[=+@-]',value):
         return "'"+value
     return value
 
