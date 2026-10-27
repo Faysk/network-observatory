@@ -9,7 +9,7 @@
   },
   "shared_root_sha256": {
     "workspace.css": "7f4530319a47f26cb2c1eda18b372e6c74a31fca4f85391a9c7c121702eda1ac",
-    "finish.css": "75bdb1fd428e5fd221ea9b57b68d9fc96c59d4e82e962e7498c6634b1b4feb42",
+    "finish.css": "677c34d8d5ad98b4ecb783c2ab67135401a52c05959cc32fde5a8fb87b241186",
     "finish.js": "d3475a2cb4fbb36c279375a5265641ef0ec44d2020be1cbec05cd32489aeaf1d",
     "loading.css": "903147c6235c79f434918f94df5e49b013626f8667842d95140add067d041670"
   }
