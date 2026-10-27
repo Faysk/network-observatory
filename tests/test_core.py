@@ -168,8 +168,8 @@ class CoreTests(unittest.TestCase):
             with guard:active-=1
             return True,1.5
         completed_at='2026-10-27T12:59:00+00:00'
-        with patch.object(core,'tcp_probe',side_effect=[(True,1.0),(True,2.0)]), \\
-             patch.object(core,'probe_device',side_effect=simulated), \\
+        with patch.object(core,'tcp_probe',side_effect=[(True,1.0),(True,2.0)]), \
+             patch.object(core,'probe_device',side_effect=simulated), \
              patch.object(core,'utcnow',return_value=completed_at):
             core.collect_once()
         self.assertGreater(peak,1,'seven probes should not run serially')
