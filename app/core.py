@@ -373,14 +373,22 @@ def get_status():
     with request_timing.acquire(LOCK), connect() as db:
         last = db.execute("SELECT * FROM samples ORDER BY id DESC LIMIT 1").fetchone()
         counts = db.execute("SELECT count(*) AS c FROM events").fetchone()["c"]
-        return {"router": ROUTER, "probe": dict(last) if last else None,
-                "metrics": latest_router(db), "devices": list_devices(db),
-                "huawei": latest_huawei(db),
-                "collector": dict(COLLECTOR_STATE),
-                "event_count": counts, "server_time": utcnow(),
-                "poll_interval_seconds": INTERVAL, "retention_days": RETENTION_DAYS, "retention_unlimited": RETENTION_DAYS==0,
-                "recording": {"pending_samples":sum(1 for _ in (DB_PATH.parent/"outbox").glob("*.json")),"quarantined_samples":sum(1 for _ in (DB_PATH.parent/"outbox"/"quarantine").rglob("*.json")),"durable_queue":True},
-                "methodology": {"router": "TCP/80 para a interface web", "internet": "TCP/443 para 1.1.1.1", "device": "ICMP ou porta TCP configurada"}}
+        result = {"router": ROUTER, "probe": dict(last) if last else None,
+                  "metrics": latest_router(db), "devices": list_devices(db),
+                  "huawei": latest_huawei(db),
+                  "collector": dict(COLLECTOR_STATE),
+                  "event_count": counts, "server_time": utcnow(),
+                  "poll_interval_seconds": INTERVAL, "retention_days": RETENTION_DAYS, "retention_unlimited": RETENTION_DAYS==0,
+                  "methodology": {"router": "TCP/80 para a interface web", "internet": "TCP/443 para 1.1.1.1", "device": "ICMP ou porta TCP configurada"}}
+    # Filesystem enumeration can take arbitrarily long with a large backlog.
+    # It is independent of the SQLite snapshot: never hold the global writer
+    # lock (or DB transaction) while traversing the microSD queue folders.
+    result["recording"] = {
+        "pending_samples":sum(1 for _ in (DB_PATH.parent/"outbox").glob("*.json")),
+        "quarantined_samples":sum(1 for _ in (DB_PATH.parent/"outbox"/"quarantine").rglob("*.json")),
+        "durable_queue":True,
+    }
+    return result
 
 
 def get_history(hours=24, limit=450):

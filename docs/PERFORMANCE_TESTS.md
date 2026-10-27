@@ -45,6 +45,19 @@ devolve metadados sem transferir CSV. A formatação protege texto não
 confiável contra interpretação como fórmulas em planilhas; o banco e JSON
 originais não sofrem alterações.
 
+## Consultas de estado e lock SQLite
+
+O `/api/status` recolhe a parte SQLite e copia o estado do coletor sob a
+proteção normal. Em seguida **liberta o lock e fecha a conexão** antes de
+enumerar os arquivos da fila (`outbox`) e da quarentena no microSD.
+A enumeração pode ser demorada num cartão ocupado, mas não deve manter
+um lock de escrita global nem impedir que outras transações SQLite avancem.
+
+As duas contagens da fila são informativas, recolhidas fora da transação;
+podem variar durante uma entrega concorrente e **não representam um snapshot
+atómico** com as métricas do router. Um teste de regressão simula uma
+enumeração lenta e exige a conclusão de uma escrita simultânea.
+
 ## Cobertura
 
 - Router: status, inventário, overview resumo/completo e dossiê em 1h/6h/12h/24h/7d/1m/1y.
