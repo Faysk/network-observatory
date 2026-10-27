@@ -14,7 +14,7 @@ Runtime source is compared to each repository main, normalizing CRLF for source 
 
 Functional Router inventory, data math, WAN views, loading states, source privacy and the three published applications have automated and live endpoint checks. Existing measurement reports distinguish LAN/backend timings from browser timings.
 
-Issues #6 and #13 remain open for physical Android browser INP/LCP/long tasks/FPS, touch/screen-reader acceptance and sustained before/after client measurements. Server tests, desktop viewport resizing and an ADB connection do not certify these criteria. Do not close them merely to make the issue list empty.
+Status atualizado em 27/10/2026: as issues #6 (closed/completed) e #13 (closed/not_planned) constam encerradas no GitHub. **Esses estados não comprovam** os critérios físicos de INP/LCP/long tasks/FPS, interação por toque/leitor de ecrã e medidas sustentadas antes/depois. Nenhum resultado de CI desktop ou ligação ADB certifica essas medições; mantêm-se pendentes de homologação no Android 8 real.
 
 The offline manufacturer registry is now installed from the official Wireshark manufacturer dataset. Earlier statements that no real OUI dataset was installed are superseded; IEEE CSV retrieval was blocked, and no counterparty protection was bypassed. The deployment records the actual provider instead of claiming direct IEEE retrieval.
 
