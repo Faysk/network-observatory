@@ -34,3 +34,25 @@ Antes de atualizar o serviço real: configurar a ACL para os clientes de LAN
 que precisam aceder ao painel, verificar alcance a partir de um peer dentro
 e outro fora da faixa, e manter rollback do código. Sem a variável,
 o painel continuará disponível no S7 via `127.0.0.1`, mas não no PC pela LAN.
+
+## Defesa contra DNS rebinding na LAN
+
+Mesmo um browser numa máquina autorizada pela ACL pode visitar domínios
+externos que tentem voltar a resolver para endereços LAN. Por isso o HTTP
+verifica **separadamente** o cabeçalho `Host`: aceita IPs RFC1918 literais e
+loopback, e nomes DNS apenas quando explicitamente incluídos em
+`FNO_ALLOWED_HOSTS`. Não considera `X-Forwarded-Host`, `Forwarded` nem
+`X-Forwarded-For` como autoridade. Hosts não reconhecidos recebem HTTP 421.
+Exemplo para acesso por um domínio doméstico confiável, definido e mantido
+pelo operador:
+
+```sh
+FNO_ALLOWED_HOSTS=s7.home,observatory.internal
+```
+
+Não configurar `*.example`, domínios de terceiros ou nomes que um atacante
+possa controlar. Esta verificação **não substitui TLS, autenticação nem a ACL
+de endereço do peer**. Um proxy reverso pode precisar de incluir o seu
+hostname real na allowlist. O acesso direto via IP LAN continua disponível
+somente a peers autorizados por `FNO_READ_ALLOW_CIDRS`.
+

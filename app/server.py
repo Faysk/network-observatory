@@ -10,6 +10,7 @@ import io
 import json
 import mimetypes
 import os
+import re
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -40,6 +41,51 @@ def parse_read_cidrs(raw):
     return tuple(grants)
 
 READ_ALLOWED_CIDRS = parse_read_cidrs(os.environ.get('FNO_READ_ALLOW_CIDRS',''))
+
+def parse_allowed_hosts(raw):
+    """Only explicit trusted DNS names; IP literals are checked separately."""
+    result=set()
+    for item in (part.strip().lower().rstrip('.') for part in (raw or '').split(',')):
+        if not item:continue
+        if len(result)>=16 or len(item)>253 or not re.fullmatch(
+                r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*',item):
+            raise ValueError('Invalid FNO_ALLOWED_HOSTS entry')
+        if item not in ('localhost',) and item.replace('.','').isdigit():
+            raise ValueError('IP literals must not be listed as hostnames')
+        result.add(item)
+    return frozenset(result)
+
+ALLOWED_HOSTS = parse_allowed_hosts(os.environ.get('FNO_ALLOWED_HOSTS',''))
+
+def host_allowed(raw_values):
+    """Defend browsers on permitted LAN clients against DNS rebinding.
+
+    Peer ACL is still checked independently. Host/forwarded headers NEVER
+    grant network access and DNS names must be explicitly configured.
+    """
+    if not isinstance(raw_values,list) or len(raw_values)!=1:
+        return False
+    value=raw_values[0]
+    if not value or len(value)>300 or any(c.isspace() for c in value) or any(c in value for c in '/\\@?#'):
+        return False
+    try:
+        parsed=urlsplit('//'+value)
+        if parsed.username or parsed.password or not parsed.hostname:
+            return False
+        if parsed.port is not None and not 1<=parsed.port<=65535:
+            return False
+        hostname=parsed.hostname.lower().rstrip('.')
+        try:
+            address=ipaddress.ip_address(hostname)
+            return address.is_loopback or (
+                isinstance(address,ipaddress.IPv4Address) and address.is_private and
+                any(address in ipaddress.ip_network(block) for block in
+                    ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16'))
+            )
+        except ValueError:
+            return hostname=='localhost' or hostname in ALLOWED_HOSTS
+    except ValueError:
+        return False
 
 def source_allowed(client_ip):
     """Use socket peer only. Never trust Host, Origin or X-Forwarded-For."""
@@ -134,7 +180,18 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         if not valid and not getattr(self,'_head_only',False):self.wfile.write(body)
 
+    def validate_host(self):
+        target=urlsplit(self.path)
+        if target.scheme or target.netloc:
+            self.error_json(403,'Proxy requests are not supported')
+            return False
+        if host_allowed(self.headers.get_all('Host',[])):
+            return True
+        self.error_json(421,'Host não autorizado; verifique FNO_ALLOWED_HOSTS')
+        return False
+
     def do_HEAD(self):
+        if not self.validate_host():return
         self._head_only=True
         try:
             with request_timing.request_scope():self.get_response()
@@ -165,6 +222,7 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     def do_GET(self):
+        if not self.validate_host():return
         from . import host_telemetry
         began = time.perf_counter()
         try:
@@ -343,6 +401,7 @@ class Handler(BaseHTTPRequestHandler):
             if not is_csv:self.wfile.write(b']')
 
     def do_POST(self):
+        if not self.validate_host():return
         if not source_allowed(self.client_address[0]):
             return self.error_json(403, 'Origem não autorizada')
         if not self.authenticate_write(): return

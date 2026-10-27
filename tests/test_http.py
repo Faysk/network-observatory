@@ -41,6 +41,36 @@ class HttpTests(unittest.TestCase):
         req=urllib.request.Request(self.url+path,data=encoded,headers=headers)
         with urllib.request.urlopen(req,timeout=HTTP_TIMEOUT) as res:return res.status,res.read(),dict(res.headers)
 
+    def test_host_header_rebinding_and_explicit_trusted_dns_names(self):
+        from app import server as server_mod
+        self.assertEqual(server_mod.parse_allowed_hosts('S7.Home,device.local.'),
+                         frozenset({'s7.home','device.local'}))
+        for invalid in ('*.example.com','https://safe.local','bad host',
+                        'x..local','bad_host','invalid/name','a'*254):
+            with self.subTest(invalid=invalid),self.assertRaises(ValueError):
+                server_mod.parse_allowed_hosts(invalid)
+        self.assertTrue(server_mod.host_allowed(['localhost:8765']))
+        self.assertTrue(server_mod.host_allowed(['127.0.0.1:8765']))
+        self.assertTrue(server_mod.host_allowed(['192.168.1.22:8765']))
+        self.assertTrue(server_mod.host_allowed(['[::1]:8765']))
+        for host in ('evil.example:8765','8.8.8.8:8765','192.168.1.1:0',
+                     'example.com@127.0.0.1','0.0.0.0:8765','localhost:99999'):
+            with self.subTest(host=host):
+                self.assertFalse(server_mod.host_allowed([host]))
+        self.assertFalse(server_mod.host_allowed(['localhost','evil.example']))
+        self.assertFalse(server_mod.host_allowed([]))
+        with patch.object(server_mod,'ALLOWED_HOSTS',frozenset({'trusted.home'})):
+            self.assertTrue(server_mod.host_allowed(['trusted.home:443']))
+            self.assertFalse(server_mod.host_allowed(['evil.example:443']))
+        for method in ('GET','HEAD','POST'):
+            headers={'Host':'evil.example:8765'}
+            data=b'{}' if method=='POST' else None
+            req=urllib.request.Request(self.url+'/api/status',data=data,method=method,headers=headers)
+            with self.subTest(method=method),self.assertRaises(urllib.error.HTTPError) as error:
+                urllib.request.urlopen(req,timeout=HTTP_TIMEOUT)
+            self.assertEqual(error.exception.code,421)
+        self.assertEqual(self.request('/api/status')[0],200)
+
     def test_read_acl_denies_unapproved_networks_and_ignores_forwarded_headers(self):
         from app import server as server_mod
         import ipaddress
