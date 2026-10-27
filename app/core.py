@@ -230,6 +230,11 @@ def collector_loop(stop_event):
         collect_once()
     except Exception as exc:
         print(f"Collector first cycle: {exc}", file=sys.stderr)
+    # The very first cycle can overrun as well (e.g. slow router startup).
+    # Skip overdue ticks before scheduling the next collection.
+    now=time.monotonic()
+    if next_due<=now:
+        next_due+=INTERVAL*(int((now-next_due)//INTERVAL)+1)
     while not stop_event.wait(max(0,next_due-time.monotonic())):
         try:
             collect_once()
