@@ -28,3 +28,8 @@ button:focus-visible,a:focus-visible,summary:focus-visible,input:focus-visible,s
 body.finish-hidden .device-orbit *,body.finish-hidden .pulsing-dot,body.finish-hidden .freshness-dot,body.finish-hidden .offline-dot{animation-play-state:paused!important}
 
 body[data-workspace="s7"][data-theme="light"]{--muted:#627386;--secondary:#4e6275;--border-soft:#d5dfe8}
+/* Narrow router headers must also fit platforms with wider fallback fonts. */
+@media(max-width:360px){
+ [data-workspace="router"] .topbar{padding:8px;gap:8px;flex-wrap:wrap;height:auto;min-height:60px}
+ [data-workspace="router"] .top-actions{max-width:100%;flex-wrap:wrap;justify-content:flex-end}
+}
