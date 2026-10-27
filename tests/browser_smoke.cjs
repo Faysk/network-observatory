@@ -10,9 +10,17 @@ const fixtureClients=()=>Array.from({length:1000},(_,i)=>({mac:'02:00:00:'+i.toS
 const stamp=new Date().toISOString(),now=Date.now();
 const full=(period)=>({
  period:{key:period,from:new Date(now-86400000).toISOString(),to:stamp,resolution_seconds:600},
- series:Array.from({length:3},(_,i)=>({timestamp:new Date(now-(3-i)*600000).toISOString(),timestamp_end:new Date(now-(3-i)*600000).toISOString(),sample_count:1,max_gap_seconds:0,cpu_pct:0,wan_rx_bytes:1000+i,wan_tx_bytes:0})),
+ series:Array.from({length:5},(_,i)=>({
+  timestamp:new Date(now-(5-i)*60000).toISOString(),timestamp_end:new Date(now-(5-i)*60000).toISOString(),
+  sample_count:1,max_gap_seconds:0,cpu_pct:0,wan_rx_bytes:1000+i,wan_tx_bytes:0,
+  rssi_24_dbm:i===2?null:-69+i,rssi_5_dbm:-60+i,
+  values:{rssi_24_dbm:{sample_count:i===2?0:1,min:i===2?null:-69+i,max:i===2?null:-69+i},
+          rssi_5_dbm:{sample_count:1,min:-60+i,max:-60+i}}
+ })),
  probes:[{timestamp:new Date(now-120000).toISOString(),timestamp_end:new Date(now-120000).toISOString(),sample_count:1,max_gap_seconds:0,router_ms:0,internet_ms:null}],
- stats:{cpu_pct:{min:0,max:0,avg:0,sample_count:1}},probe_stats:{router_ms:{min:0,max:0,avg:0,sample_count:1}},
+ stats:{cpu_pct:{min:0,max:0,avg:0,sample_count:5},
+        rssi_24_dbm:{min:-69,max:-65,avg:-67,sample_count:4},
+        rssi_5_dbm:{min:-60,max:-56,avg:-58,sample_count:5}},probe_stats:{router_ms:{min:0,max:0,avg:0,sample_count:1}},
  counter_series:[0,1,2].map(i=>({timestamp:new Date(now-(3-i)*60000).toISOString(),wan_rx_bytes:i===1?5:100+i,wan_tx_bytes:50+i,wan_rx_observed_bytes:i*2**30,wan_tx_observed_bytes:i,observed_epochs:{wan_rx_observed_bytes:0,wan_tx_observed_bytes:0}})),
  counter_period:{from:new Date(now-86400000).toISOString(),to:stamp,resolution_seconds:240,sampled_preview:true,observed_increments:{wan_rx_bytes:{bytes:2**31,valid_pairs:2,excluded_transitions:1},wan_tx_bytes:{bytes:2,valid_pairs:2,excluded_transitions:0}}},
  events:[],quality:{coverage_percent:1,sample_count:1,expected_count:1440}

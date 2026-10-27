@@ -58,8 +58,25 @@ class Buckets:
                 item['count']+=1;item['sum']+=value
                 item['min']=value if item['min'] is None else min(item['min'],value)
                 item['max']=value if item['max'] is None else max(item['max'],value)
+                if target is bucket['values'] and key in ('rssi_24_dbm','rssi_5_dbm'):
+                    # Metric-specific timestamps prevent a sparse Wi-Fi band
+                    # from losing legitimate adjacent segments. Missing readings
+                    # never gain an invented value or time.
+                    last=item.get('last_observed_at')
+                    if last is None:item['first_observed_at']=point['timestamp']
+                    else:item['max_gap_seconds']=max(item.get('max_gap_seconds',0),
+                        ts-stamp(last))
+                    item['last_observed_at']=point['timestamp']
     def result(self):
-        def finish(item):return {'sample_count':item['count'],'min':item['min'],'max':item['max'],'avg':item['sum']/item['count'] if item['count'] else None,'mean_semantics':'arithmetic_sample_mean','p95':None}
+        def finish(item):
+            result={'sample_count':item['count'],'min':item['min'],'max':item['max'],
+                    'avg':item['sum']/item['count'] if item['count'] else None,
+                    'mean_semantics':'arithmetic_sample_mean','p95':None}
+            if item.get('first_observed_at') is not None:
+                result.update(first_observed_at=item['first_observed_at'],
+                              last_observed_at=item['last_observed_at'],
+                              max_gap_seconds=item.get('max_gap_seconds',0))
+            return result
         points=[]
         for index,bucket in sorted(self.buckets.items()):
             values={k:finish(bucket['values'].get(k,{'count':0,'sum':0,'min':None,'max':None})) for k in self.keys}

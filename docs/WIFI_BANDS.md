@@ -28,6 +28,28 @@ de potência de transmissão da antena, sinal medido por um telemóvel, velocida
 de Internet, nem qualidade geral da banda. Uma curva só existe se houver
 estações com RSSI e correspondência de banda conhecida. Sem estações, null.
 
+## Leitura correta do gráfico de RSSI
+
+A escala vertical do Wi-Fi está em **dBm negativos** (por exemplo, −65 dBm),
+não em 0–1. As séries independentes mostram **RSSI médio de estações por
+banda**, não número de clientes. Os botões de legenda identificam quantas
+leituras tinham RSSI validado em cada banda no período.
+
+É normal que uma leitura agregada mostre valor em 5 GHz e **Sem leitura
+válida neste intervalo** em 2,4 GHz, mesmo quando a banda 2,4 possui
+leituras e média calculada noutros momentos da janela. Este `null`
+representa ausência de uma estação com RSSI e banda confirmados naquela
+observação; não é prova de falha, desligamento ou qualidade ruim da banda.
+
+Os pontos isolados continuam visíveis. Quando existem leituras consecutivas
+de uma mesma banda com intervalos reais não superiores a 180 segundos, a
+linha pode conectá-las, incluindo buckets com apenas parte das amostras
+comprovadas. A API fornece, apenas para as duas métricas RSSI por banda em cada bucket, os campos
+`first_observed_at`, `last_observed_at` e `max_gap_seconds` para decidir
+a conexão sem fabricar amostras. Lacunas maiores, valores desconhecidos,
+amostras com intervalos internos grandes ou dados históricos de versões sem
+proveniência suficiente não são interpolados.
+
 ## Atual vs histórico
 
 Uma etiqueta de banda **atual** exige simultaneamente:

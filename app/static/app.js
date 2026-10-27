@@ -15,7 +15,7 @@ const config={
  router:{title:'Router Huawei',desc:'CPU e memória reais; temperatura óptica não é temperatura da CPU.',a:'cpu_pct',b:'memory_pct',main:'CPU',secondary:'RAM',unit:'%',scale:1},
  latency:{title:'Desempenho e conectividade',desc:'Tempo de ligação TCP do servidor ao gateway e a 1.1.1.1:443. Não é ping, DNS ou teste de velocidade.',a:'router_ms',b:'internet_ms',main:'TCP gateway',secondary:'TCP exterior',unit:'ms',scale:1,probes:true},
  devices:{title:'Presença dos aparelhos',desc:'Aparelhos reportados online em cada amostra. Ausência na tabela não prova desconexão.',a:'online_clients',b:null,main:'Online reportados',unit:'aparelhos',scale:1},
- wifi:{title:'Wi-Fi e sinal',desc:'RSSI das estações separado por banda reportada na mesma leitura do router. Não mede a potência da antena nem qualidade de Internet.',a:'rssi_24_dbm',b:'rssi_5_dbm',main:'Clientes em 2,4 GHz',secondary:'Clientes em 5 GHz',unit:'dBm',scale:1},
+ wifi:{title:'Wi-Fi e sinal',desc:'RSSI das estações separado por banda reportada na mesma leitura do router. Não mede a potência da antena nem qualidade de Internet. Cada banda só aparece quando há estações com banda confirmada; ausência de amostra não é falha de Wi-Fi.',a:'rssi_24_dbm',b:'rssi_5_dbm',main:'RSSI médio · 2,4 GHz',secondary:'RSSI médio · 5 GHz',unit:'dBm',scale:1},
  health:{title:'Estado da recolha e conectividade',desc:'Observações de resposta TCP, sem pontuação sintética de experiência.',a:'router_online',b:'internet_online',main:'Gateway responde',secondary:'Exterior responde',unit:'0/1',scale:1,probes:true},
  events:{title:'Eventos e logs',desc:'Eventos persistidos pela aplicação. Logs internos do router não são recolhidos.',a:null,b:null,main:'Eventos',unit:'',scale:1},
  integrations:{title:'Integrações e fontes',desc:'Estados derivados das últimas leituras recebidas, sem introdução de tokens no navegador.',a:null,b:null,main:'Fontes',unit:'',scale:1}
@@ -152,25 +152,45 @@ function seriesPath(series,key,period,x,y){
  const resolution=Math.max(60,period.resolution_seconds||60),origin=Date.parse(period.from);
  for(const p of series){
    const value=p[key];if(!Number.isFinite(value)){previous=null;continue;}
-   const incomplete=!period.sampled_preview&&(p.max_gap_seconds>180||(p.values?.[key]?.sample_count<p.sample_count));
+   const evidence=p.values?.[key];
+   const previousEvidence=previous?.values?.[key];
+   // Old API responses remain conservative; new readings use timestamps
+   // for this metric rather than treating every partial bucket as a gap.
+   const hasBounds=Boolean(evidence?.first_observed_at&&evidence?.last_observed_at);
+   const incomplete=!period.sampled_preview&&(hasBounds?
+     evidence.max_gap_seconds>180:
+     (p.max_gap_seconds>180||(evidence?.sample_count<p.sample_count)));
    const epochs=key.includes('_observed_')?'observed_epochs':'counter_epochs';
    const counterDrop=previous&&key.startsWith('wan_')&&(value<previous[key]||(p[epochs]?.[key]!=null&&previous[epochs]?.[key]!=null&&p[epochs][key]!==previous[epochs][key]));
    const gap=counterDrop||previous&&(period.sampled_preview?
      Math.floor((Date.parse(p.timestamp)-origin)/(resolution*1000))-Math.floor((Date.parse(previous.timestamp)-origin)/(resolution*1000))>1:
-     Date.parse(p.timestamp)-Date.parse(previous.timestamp_end||previous.timestamp)>180000);
+     (hasBounds&&previousEvidence?.last_observed_at?
+       Date.parse(evidence.first_observed_at)-Date.parse(previousEvidence.last_observed_at):
+       Date.parse(p.timestamp)-Date.parse(previous.timestamp_end||previous.timestamp))>180000);
    path+=`${previous&&!gap&&!incomplete?'L':'M'}${x(p.timestamp).toFixed(2)},${y(value).toFixed(2)} `;
    previous=incomplete?null:p;
  }
  return path;
 }
+// Reusable, testable scale: RSSI in dBm is signed, including both Wi-Fi bands.
+function chartDomain(series,defs){
+ const nums=series.flatMap(p=>defs.flatMap(d=>{const v=p.values?.[d.key];return [p[d.key],v?.min,v?.max].filter(Number.isFinite).map(x=>x/(d.scale||1));}));
+ if(!nums.length)return null;
+ let low=Math.min(...nums),high=Math.max(...nums);const pad=Math.max(1,(high-low)*.12);low-=pad;high+=pad;
+ if(defs.some(d=>d.key==='presence')){low=0;high=100;}
+ if(defs.some(d=>d.key==='router_online'||d.key==='internet_online')){low=0;high=1;}
+ const percent=defs.every(d=>['cpu_pct','memory_pct','presence'].includes(d.key));
+ if(percent){low=Math.max(0,low);high=Math.min(100,high);}
+ else if(!defs.some(d=>d.unit==='dBm'))low=Math.max(0,low);
+ if(high<=low)high=low+1;
+ return {low,high};
+}
 function chart(node,series,defs,period,selection){
  node.replaceChildren();const valid=series.filter(p=>defs.some(d=>Number.isFinite(p[d.key])));
  if(!valid.length){node.innerHTML=empty('Sem amostras desta métrica no período selecionado.');return;}
  const width=800,height=245,left=58,right=16,top=22,bottom=32;
- const start=Date.parse(period.from),end=Date.parse(period.to),step=period.resolution_seconds||60;
- const nums=series.flatMap(p=>defs.flatMap(d=>{const v=p.values?.[d.key];return [p[d.key],v?.min,v?.max].filter(Number.isFinite).map(x=>x/(d.scale||1));}));
- let low=Math.min(...nums),high=Math.max(...nums);const pad=Math.max(1,(high-low)*.12);low-=pad;high+=pad;if(defs.some(d=>d.key==='presence')){low=0;high=100;}if(defs.some(d=>d.key==='router_online'||d.key==='internet_online')){low=0;high=1;}
- const percent=defs.every(d=>['cpu_pct','memory_pct','presence'].includes(d.key));if(percent){low=Math.max(0,low);high=Math.min(100,high);}else if(defs.every(d=>d.key!=='rssi_dbm'))low=Math.max(0,low);if(high<=low)high=low+1;
+ const start=Date.parse(period.from),end=Date.parse(period.to);
+ const {low,high}=chartDomain(series,defs);
  const x=t=>left+(Date.parse(t)-start)/Math.max(1,end-start)*(width-left-right), y=v=>top+(1-(v-low)/(high-low))*(height-top-bottom);
  let content='';for(let i=0;i<5;i++){const yy=top+i*(height-top-bottom)/4;content+=`<line x1="${left}" x2="${width-right}" y1="${yy}" y2="${yy}" stroke="#304558" stroke-dasharray="3 5"/><text x="${left-8}" y="${yy+4}" text-anchor="end" fill="#91a7ba" font-size="11">${fmt(high-i*(high-low)/4)}</text>`;}
  for(let i=0;i<4;i++){const t=start+i*(end-start)/3;content+=`<text x="${left+i*(width-left-right)/3}" y="${height-6}" text-anchor="${i===0?'start':i===3?'end':'middle'}" fill="#91a7ba" font-size="11">${esc(time(new Date(t).toISOString()))}</text>`;}
@@ -178,7 +198,7 @@ function chart(node,series,defs,period,selection){
    const path=seriesPath(series,d.key,period,x,v=>y(v/(d.scale||1)));
    for(const p of series){const extrema=p.values?.[d.key];if(!d.key.startsWith('wan_')&&Number.isFinite(p[d.key])&&extrema&&extrema.min!==extrema.max)content+=`<line x1="${x(p.timestamp)}" x2="${x(p.timestamp)}" y1="${y(extrema.min/(d.scale||1))}" y2="${y(extrema.max/(d.scale||1))}" stroke="${d.color}" opacity=".35"/>`;}
    // A genuinely isolated observation must remain visible without inventing a link.
-   for(const segment of path.matchAll(/M(-?[\d.]+),(-?[\d.]+)([^M]*)/g))if(!segment[3].includes('L'))content+=`<circle cx="${segment[1]}" cy="${segment[2]}" r="1.5" fill="${d.color}"/>`;
+   for(const segment of path.matchAll(/M(-?[\d.]+),(-?[\d.]+)([^M]*)/g))if(!segment[3].includes('L'))content+=`<circle cx="${segment[1]}" cy="${segment[2]}" r="${d.unit==='dBm'?3:1.5}" fill="${d.color}"/>`;
    content+=`<path class="history-series-line" d="${path}" fill="none" stroke="${d.color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>`;
  });
  node.innerHTML=`<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Histórico real com intervalos sem amostras">${content}<line class="inspect-line" x1="0" x2="0" y1="${top}" y2="${height-bottom}" stroke="#c5eadd" opacity="0"/><rect class="inspect-area" x="${left}" y="${top}" width="${width-left-right}" height="${height-top-bottom}" fill="transparent" tabindex="0" role="img" aria-label="Inspecionar amostras com setas esquerda e direita"/></svg>`;
@@ -191,12 +211,12 @@ function chart(node,series,defs,period,selection){
  line.setAttribute('x1',xx);line.setAttribute('x2',xx);line.setAttribute('opacity','1');line.setAttribute('stroke-dasharray','4 5');
  markers.innerHTML=defs.filter(d=>Number.isFinite(p[d.key])).map(d=>`<circle cx="${xx}" cy="${y(p[d.key]/(d.scale||1))}" r="5" fill="${d.color}" stroke="#161021" stroke-width="2"/>`).join('');
  const stamp=new Date(p.timestamp).toLocaleString('pt-PT',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
- tip.innerHTML=`<strong class="inspector-time">${esc(stamp)}</strong>${defs.map(d=>{const v=p[d.key],stats=p.values?.[d.key];return `<div class="inspector-row"><span><svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="3.5" fill="${d.color}"/></svg>${esc(d.label)}</span><b>${Number.isFinite(v)?esc(fmt(v/(d.scale||1),3)):'Sem dados'} <small>${esc(d.unit||'')}</small></b></div>${stats&&stats.min!==stats.max?`<div class="inspector-range">Mín. ${esc(fmt(stats.min/(d.scale||1),3))} · Máx. ${esc(fmt(stats.max/(d.scale||1),3))} ${esc(d.unit||'')}</div>`:''}`;}).join('')}<span class="inspector-meta">${esc(p.sample_count??1)} amostras · ${defs.some(d=>d.key.includes('_observed_'))?'soma de incrementos válidos':p.values?'média do intervalo':'observação original'}${p.max_gap_seconds>180?' · contém lacuna':''}${distance==null?'':' · leitura mais próxima ('+fmt(distance/60,1)+' min do cursor)'}</span>`;
+ tip.innerHTML=`<strong class="inspector-time">${esc(stamp)}</strong>${defs.map(d=>{const v=p[d.key],stats=p.values?.[d.key];return `<div class="inspector-row"><span><svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="3.5" fill="${d.color}"/></svg>${esc(d.label)}</span><b>${Number.isFinite(v)?esc(fmt(v/(d.scale||1),3))+' <small>'+esc(d.unit||'')+'</small>':'Sem leitura válida neste intervalo'}</b></div>${d.unit==='dBm'&&stats?'<div class="inspector-range">'+esc(String(stats.sample_count||0))+' de '+esc(String(p.sample_count??0))+' amostras com RSSI válido nesta banda</div>':''}${stats&&stats.min!==stats.max?`<div class="inspector-range">Mín. ${esc(fmt(stats.min/(d.scale||1),3))} · Máx. ${esc(fmt(stats.max/(d.scale||1),3))} ${esc(d.unit||'')}</div>`:''}`;}).join('')}<span class="inspector-meta">${esc(p.sample_count??1)} amostras · ${defs.some(d=>d.key.includes('_observed_'))?'soma de incrementos válidos':p.values?'média do intervalo':'observação original'}${p.max_gap_seconds>180?' · contém lacuna':''}${distance==null?'':' · leitura mais próxima ('+fmt(distance/60,1)+' min do cursor)'}</span>`;
  tip.hidden=false;
  // Use the actual SVG matrix: aspect-ratio letterboxing must not offset the cursor.
  const point=svg.createSVGPoint();point.x=xx;point.y=top;const screen=point.matrixTransform(svg.getScreenCTM()),box=node.getBoundingClientRect();
  const pos=screen.x-box.left;tip.style.left=Math.max(8,Math.min(box.width-tip.offsetWidth-8,pos+16>box.width-tip.offsetWidth?pos-tip.offsetWidth-16:pos+16))+'px';tip.style.top=Math.max(4,screen.y-box.top+8)+'px';
- if(selection)selection.textContent=`${stamp} · ${defs.map(d=>`${d.label}: ${fmt(p[d.key]==null?null:p[d.key]/(d.scale||1),3)} ${d.unit||''}`).join(' · ')} · ${p.sample_count??1} amostras · ${defs.some(d=>d.key.includes('_observed_'))?'soma de incrementos válidos':p.values?'média do intervalo':'observação original'}`;
+ if(selection)selection.textContent=`${stamp} · ${defs.map(d=>`${d.label}: ${Number.isFinite(p[d.key])?fmt(p[d.key]/(d.scale||1),3)+' '+(d.unit||''):'sem leitura válida no intervalo'}`).join(' · ')} · ${p.sample_count??1} amostras · ${defs.some(d=>d.key.includes('_observed_'))?'soma de incrementos válidos':p.values?'média do intervalo':'observação original'}`;
  }
  function pointer(e){const matrix=svg.getScreenCTM();if(!matrix)return;const point=svg.createSVGPoint();point.x=e.clientX;point.y=e.clientY;const local=point.matrixTransform(matrix.inverse()),t=start+Math.max(0,Math.min(1,(local.x-left)/(width-left-right)))*(end-start);let best=0;
  for(let i=1;i<valid.length;i++)if(Math.abs(Date.parse(valid[i].timestamp)-t)<Math.abs(Date.parse(valid[best].timestamp)-t))best=i;
@@ -348,7 +368,7 @@ function renderSheet(){const c=config[state.metric],b=state.bundle;if(!c||!b)ret
  if(observed){$('#detailTitle').textContent=$('#chartTitle').textContent='Incrementos WAN observados';$('#detailDesc').textContent='Soma dos aumentos entre leituras consecutivas válidas. Quedas e lacunas são excluídas; pode estar incompleta. Não é consumo total nem velocidade.';$('#chartSubtitle').textContent=`${time(b.period.from)} — ${time(b.period.to)} · somado antes da redução de pontos; quebras preservadas`;}
  const defs=[...(c.a&&state.main?[{key:c.a,label:c.main,color:'#c3a4ff',scale:c.scale,unit:c.unit}]:[]),...(c.b&&state.secondary?[{key:c.b,label:c.secondary,color:'#69e9dc',scale:c.scale,unit:c.unit}]:[])];
  if(observed)for(const d of defs){d.key=d.key.replace('_bytes','_observed_bytes');d.label=d.label.replace('Contador','Incrementos');}
- $('#legendBox').innerHTML=[...(c.a?[['main',c.main,state.main]]:[]),...(c.b?[['secondary',c.secondary,state.secondary]]:[])].map(([key,label,on])=>`<button class="legend-button ${on?'':'off'}" data-series="${key}" aria-pressed="${on}">${esc(observed?label.replace('Contador','Incrementos'):label)}</button>`).join('')+(state.metric==='traffic'?`<button class="legend-button" data-counter-mode="${observed?'raw':'observed'}">${observed?'Ver contadores brutos':'Ver incrementos observados'}</button>`:'');
+ $('#legendBox').innerHTML=[...(c.a?[['main',c.main,state.main]]:[]),...(c.b?[['secondary',c.secondary,state.secondary]]:[])].map(([key,label,on])=>`<button class="legend-button ${on?'':'off'}" data-series="${key}" aria-pressed="${on}">${esc(observed?label.replace('Contador','Incrementos'):label)}${state.metric==='wifi'?'<small> · '+esc(String(b.stats?.[key==='main'?c.a:c.b]?.sample_count??0))+' leituras</small>':''}</button>`).join('')+(state.metric==='traffic'?`<button class="legend-button" data-counter-mode="${observed?'raw':'observed'}">${observed?'Ver contadores brutos':'Ver incrementos observados'}</button>`:'');
  if(defs.length)chart($('#historyChart'),state.metric==='traffic'&&b.counter_series?b.counter_series:c.probes?b.probes:b.series,defs,state.metric==='traffic'&&b.counter_period?b.counter_period:b.period,$('#selectionSummary'));else $('#historyChart').innerHTML=empty('Consulta as fontes e eventos abaixo. Não existe uma série numérica para esta vista.');
  const stats=c.probes?b.probe_stats:b.stats,a=stats[c.a]||{};
  $('#detailStats').innerHTML=tile('Mínimo',fmt(a.min==null?null:a.min/c.scale),c.unit,'Valor real no arquivo')+tile('Média amostral',fmt(a.avg==null?null:a.avg/c.scale),c.unit,'Média aritmética das leituras')+tile('Máximo',fmt(a.max==null?null:a.max/c.scale),c.unit,'Extremo preservado')+tile('Amostras válidas',fmt(a.sample_count||0,0),'','Desta métrica no período');

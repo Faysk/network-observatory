@@ -45,6 +45,46 @@ assert(!draw([point(840,1),point(2640,2)]).includes('L'),'Missing summary bucket
 assert(!draw([point(840,1),point(1740,null),point(2640,2)]).includes('L'),'Unknown must break line');
 assert(!traceContext.trace([point(0,1),point(600,2)],'value',{...period,sampled_preview:false},t=>Date.parse(t),v=>v).includes('L'),'Real detailed gaps must remain gaps');
 console.log('Router lines: adjacent preview buckets connect; missing/null/detailed gaps remain interrupted.');
+const partialBand=(first,last,value)=>({
+ timestamp:stamp(first),timestamp_end:stamp(last),sample_count:4,max_gap_seconds:60,
+ rssi_24_dbm:value,values:{rssi_24_dbm:{
+   sample_count:2,first_observed_at:stamp(first),last_observed_at:stamp(last),max_gap_seconds:last-first}}
+});
+const bandPeriod={from:stamp(0),resolution_seconds:240,sampled_preview:false};
+const bandLine=rows=>traceContext.trace(rows,'rssi_24_dbm',bandPeriod,
+ t=>(Date.parse(t)-origin)/1000,v=>v);
+const closeBands=[partialBand(20,150,-69),partialBand(270,350,-67)];
+assert(bandLine(closeBands).includes('L'),'Valid sparse 2.4 GHz samples must form a line when observed <180s apart');
+const remoteBands=[partialBand(20,100,-69),partialBand(370,420,-67)];
+assert(!bandLine(remoteBands).includes('L'),'2.4 GHz must break if metric observations differ by >180s');
+const insideGap=[partialBand(20,220,-69),partialBand(270,350,-67)];
+assert(!bandLine(insideGap).includes('L'),'An internal gap >180s must not be interpolated');
+const oldBands=closeBands.map(({values,...other})=>({...other,values:{rssi_24_dbm:{sample_count:2}}}));
+assert(!bandLine(oldBands).includes('L'),'Old API buckets without evidence must remain conservative');
+console.log('Wi-Fi per-band adjacency uses actual metric timestamps; missing intervals remain gaps.');
+
+
+// Signed RSSI bands must not be clamped to a positive 0..1 chart.
+const domainContext={Number,Math};vm.createContext(domainContext);
+vm.runInContext(source.slice(source.indexOf('function chartDomain('),source.indexOf('function chart('))+';this.domain=chartDomain',domainContext);
+const bandDefs=[{key:'rssi_24_dbm',unit:'dBm',scale:1},{key:'rssi_5_dbm',unit:'dBm',scale:1}];
+const bands=[
+ {rssi_24_dbm:-65,rssi_5_dbm:-58,values:{rssi_24_dbm:{min:-73,max:-63},rssi_5_dbm:{min:-62,max:-55}}},
+ {rssi_24_dbm:null,rssi_5_dbm:-56,values:{rssi_24_dbm:{min:null,max:null},rssi_5_dbm:{min:-57,max:-56}}},
+ {rssi_24_dbm:-69,rssi_5_dbm:null}
+];
+const bandDomain=domainContext.domain(bands,bandDefs);
+assert(bandDomain.low<=-73&&bandDomain.high>=-55,'RSSI signed extrema must remain inside plot');
+assert(bandDomain.high<0,'Negative dBm readings must never use 0..1 default domain');
+const only24=domainContext.domain([{rssi_24_dbm:-80,rssi_5_dbm:null}],bandDefs);
+assert(only24.low<-80&&only24.high>-80&&only24.high<0,'single 2.4 GHz sample must be visible');
+assert.equal(domainContext.domain([{rssi_24_dbm:null,rssi_5_dbm:null}],bandDefs),null,'missing readings have no domain');
+const percentDomain=domainContext.domain([{cpu_pct:0},{cpu_pct:67}],[{key:'cpu_pct',unit:'%',scale:1}]);
+assert.equal(percentDomain.low,0,'CPU chart keeps nonnegative baseline');
+const counterDomain=domainContext.domain([{wan_rx_bytes:2**30},{wan_rx_bytes:4*2**30}],[{key:'wan_rx_bytes',unit:'GiB',scale:2**30}]);
+assert.equal(counterDomain.low,0,'nonnegative WAN counter chart still starts at zero');
+assert(source.includes("main:'RSSI médio · 2,4 GHz'"),'Wi-Fi legend must not call RSSI client counts');
+console.log('Wi-Fi chart: negative dBm domain, partial/missing bands, extrema and other metrics remain correct.');
 
 for(const file of ['app/static/app.js','app/static/s7/js/app.js']){
  const code=fs.readFileSync(file,'utf8'),start=code.indexOf('function parseTelemetryJson('),end=code.indexOf('async function ',start);
