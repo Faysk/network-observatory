@@ -9,6 +9,7 @@ import math
 import os
 import sqlite3
 import time
+from contextlib import closing
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -120,7 +121,7 @@ def history(host_db, now, limit=480):
         return [], False
     cutoff = (now-timedelta(hours=24)).timestamp()
     try:
-        with sqlite3.connect(host_db.resolve().as_uri()+'?mode=ro', uri=True, timeout=1) as db:
+        with closing(sqlite3.connect(host_db.resolve().as_uri()+'?mode=ro', uri=True, timeout=1)) as db:
             rows = db.execute(
                 'SELECT ts,payload FROM host_samples WHERE ts>=? AND ts<=? ORDER BY ts DESC LIMIT ?',
                 (cutoff, now.timestamp()+60, limit+1)).fetchall()
@@ -241,7 +242,7 @@ def read(now=None, host_snapshot=None, changes=None, rules=None):
                 try:
                     selected = rules['change_sources']
                     placeholders = ','.join('?' for _ in selected)
-                    with sqlite3.connect(core.DB_PATH.resolve().as_uri()+'?mode=ro',uri=True,timeout=1) as db:
+                    with closing(sqlite3.connect(core.DB_PATH.resolve().as_uri()+'?mode=ro',uri=True,timeout=1)) as db:
                         cutoff=(now-timedelta(minutes=rules['change_window_minutes'])).isoformat()
                         changes=[dict(zip(('id','source','previous_at','observed_at','crosses_gap'),row))
                             for row in db.execute(

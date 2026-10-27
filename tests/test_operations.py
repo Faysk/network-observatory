@@ -4,6 +4,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -88,7 +89,7 @@ class OperationsTests(unittest.TestCase):
         self.assertTrue(all('ip' not in json.dumps(x).lower() for x in a['alerts']))
 
     def test_existing_host_archive_supports_growth_calculation(self):
-        with sqlite3.connect(Path(self.temp.name)/'host-telemetry.db') as db:
+        with closing(sqlite3.connect(Path(self.temp.name)/'host-telemetry.db')) as db, db:
             db.execute('CREATE TABLE host_samples(ts REAL PRIMARY KEY,payload TEXT NOT NULL)')
             for hours,size in [(7,10),(0.02,100)]:
                 when=self.now-timedelta(hours=hours)
@@ -112,7 +113,7 @@ class OperationsTests(unittest.TestCase):
         self.assertIsNone(response['health']['hostSampleAgeMinutes'])
 
     def test_growth_remains_visible_when_local_alerts_are_disabled(self):
-        with sqlite3.connect(Path(self.temp.name)/'host-telemetry.db') as db:
+        with closing(sqlite3.connect(Path(self.temp.name)/'host-telemetry.db')) as db, db:
             db.execute('CREATE TABLE host_samples(ts REAL PRIMARY KEY,payload TEXT NOT NULL)')
             for hours,size in [(8,20),(1/60,80)]:
                 when=self.now-timedelta(hours=hours)
@@ -127,7 +128,7 @@ class OperationsTests(unittest.TestCase):
         self.assertEqual(len(response['history']['points']),2)
 
     def test_malformed_history_is_an_explicit_gap_not_total_loss(self):
-        with sqlite3.connect(Path(self.temp.name)/'host-telemetry.db') as db:
+        with closing(sqlite3.connect(Path(self.temp.name)/'host-telemetry.db')) as db, db:
             db.execute('CREATE TABLE host_samples(ts REAL PRIMARY KEY,payload TEXT NOT NULL)')
             data=[
                 (8,json.dumps({'diagnostics':{'databaseMB':20}})),
@@ -149,7 +150,7 @@ class OperationsTests(unittest.TestCase):
         self.assertIsNotNone(response['health']['growthMBPerDay'])
 
     def test_outdated_growth_does_not_trigger_a_new_warning(self):
-        with sqlite3.connect(Path(self.temp.name)/'host-telemetry.db') as db:
+        with closing(sqlite3.connect(Path(self.temp.name)/'host-telemetry.db')) as db, db:
             db.execute('CREATE TABLE host_samples(ts REAL PRIMARY KEY,payload TEXT NOT NULL)')
             for hours,size in [(16,20),(8,500)]:
                 db.execute('INSERT INTO host_samples VALUES(?,?)',
@@ -163,7 +164,7 @@ class OperationsTests(unittest.TestCase):
         self.assertNotIn('db_growth',[a['id'] for a in response['alerts']])
 
     def test_irrelevant_recent_changes_cannot_hide_tracked_policy_change(self):
-        with sqlite3.connect(self.db) as db:
+        with closing(sqlite3.connect(self.db)) as db, db:
             db.execute('CREATE TABLE router_changes(id INTEGER PRIMARY KEY,source TEXT,previous_at TEXT,observed_at TEXT,crosses_gap INTEGER)')
             db.execute('INSERT INTO router_changes VALUES(1,?,?,?,?)',
                 ('wps',(self.now-timedelta(minutes=13)).isoformat(),
@@ -178,7 +179,7 @@ class OperationsTests(unittest.TestCase):
         self.assertEqual(len([a for a in response['alerts'] if a['id'].startswith('config_')]),1)
 
     def test_source_queries_are_read_only(self):
-        with sqlite3.connect(self.db) as db:
+        with closing(sqlite3.connect(self.db)) as db, db:
             db.execute('CREATE TABLE router_changes(id INTEGER PRIMARY KEY,source TEXT,previous_at TEXT,observed_at TEXT,crosses_gap INTEGER)')
             db.execute('INSERT INTO router_changes VALUES(1,?,?,?,?)',
                  ('wps',(self.now-timedelta(minutes=4)).isoformat(),(self.now-timedelta(minutes=2)).isoformat(),0))
@@ -187,6 +188,28 @@ class OperationsTests(unittest.TestCase):
             response=operations.read(now=self.now,host_snapshot=self.host())
         self.assertEqual([x['id'] for x in response['alerts']],['config_1'])
         self.assertEqual(self.db.stat().st_size,before)
+
+    def test_queries_close_connections_immediately_even_when_sql_fails(self):
+        core.init_db()
+        host_db=Path(self.temp.name)/'host-telemetry.db'
+        with closing(sqlite3.connect(host_db)) as db, db:
+            db.execute('CREATE TABLE unrelated(value TEXT)')
+        real_connect=sqlite3.connect
+        opened=[]
+        class TrackedConnection(sqlite3.Connection):
+            closed=False
+            def close(self):
+                self.closed=True
+                return super().close()
+        def connect(*args,**kwargs):
+            kwargs.setdefault('factory',TrackedConnection)
+            connection=real_connect(*args,**kwargs)
+            if isinstance(connection,TrackedConnection):opened.append(connection)
+            return connection
+        with patch('app.operations.sqlite3.connect',side_effect=connect),patch('app.operations.sizes_and_storage',return_value=self.values()):
+            operations.read(now=self.now,host_snapshot=self.host())
+        self.assertGreaterEqual(len(opened),2)
+        self.assertTrue(all(connection.closed for connection in opened))
 
 
 if __name__ == '__main__':
