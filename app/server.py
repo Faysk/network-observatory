@@ -25,6 +25,12 @@ EXPORT_SLOTS = threading.BoundedSemaphore(4)
 # ThreadingHTTPServer spawns a thread per connection; cap expensive API reads.
 API_READ_SLOTS = threading.BoundedSemaphore(24)
 
+def safe_csv_cell(value):
+    """Keep spreadsheet exports as text, not a formula from an untrusted field."""
+    if isinstance(value,str) and re.match(r'^[\\s\\u200b\\ufeff\\x00-\\x1f]*[=+@-]',value):
+        return "'"+value
+    return value
+
 def parse_read_cidrs(raw):
     """Explicit local-network grants; never accept public or internet-wide ACLs."""
     grants=[]
@@ -341,7 +347,9 @@ class Handler(BaseHTTPRequestHandler):
             if path.path == "/api/export/events.csv":
                 events = core.get_events(limit=100000)
                 f = io.StringIO(); w = csv.DictWriter(f, fieldnames=["id","ts","severity","category","title","detail","source"])
-                w.writeheader(); w.writerows(events)
+                w.writeheader()
+                for event in events:
+                    w.writerow({key:safe_csv_cell(value) for key,value in event.items()})
                 return self.respond(200, "\ufeff"+f.getvalue(), "text/csv; charset=utf-8")
             relative = "index.html" if path.path in ("", "/router/") else "s7/index.html" if path.path == "/s7/" else path.path[len("/router/"):] if path.path.startswith("/router/") else path.path.lstrip("/")
             if ".." in Path(relative).parts: return self.error_json(403, "Invalid path")
@@ -384,7 +392,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             fields=('timestamp','online','rssi_dbm','snr_db','link_rx_phy_mbps','link_tx_phy_mbps','download_mbps','upload_mbps','latency_lan_ms','interface','source','quality','measurement_semantics','observation_json')
             def csv_line(values):
-                buf=io.StringIO();csv.writer(buf).writerow(values);self.wfile.write(buf.getvalue().encode('utf-8'))
+                buf=io.StringIO();csv.writer(buf).writerow([safe_csv_cell(v) for v in values]);self.wfile.write(buf.getvalue().encode('utf-8'))
             if is_csv:
                 self.wfile.write(b'\xef\xbb\xbf');csv_line(fields)
             else:self.wfile.write(b'[')
