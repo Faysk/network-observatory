@@ -255,6 +255,37 @@ class HttpTests(unittest.TestCase):
         finally:
             for _ in range(held):EXPORT_SLOTS.release()
 
+    def test_device_export_streams_multiple_sqlite_batches_without_duplicates(self):
+        from datetime import datetime, timedelta, timezone
+        import csv,io
+        mac='02:00:00:00:00:ab'
+        base=datetime.now(timezone.utc)-timedelta(minutes=30)
+        count=265
+        with core.connect() as db:
+            db.executemany(
+                'INSERT INTO router_client_samples(sample_id,ts,mac,payload) VALUES(?,?,?,?)',
+                [(95000+i,(base+timedelta(seconds=2*i)).isoformat(),mac,
+                  json.dumps({'reported_status':'Online','names':['batch-'+str(i)],
+                              'stations':[{'rssi_dbm':-70+i%10,'interface':'wlan1'}]}))
+                 for i in range(count)])
+        target='/api/v1/devices/0200000000ab/export.json?period=24h'
+        status,body,_=self.request(target)
+        self.assertEqual(status,200)
+        records=json.loads(body)
+        self.assertEqual(len(records),count)
+        self.assertEqual([r['observation']['names'][0] for r in records],
+                         ['batch-'+str(i) for i in range(count)])
+        csv_status,csv_body,_=self.request(target.replace('export.json','export.csv'))
+        self.assertEqual(csv_status,200)
+        csv_rows=list(csv.DictReader(io.StringIO(csv_body.decode('utf-8-sig'))))
+        self.assertEqual(len(csv_rows),count)
+        self.assertEqual([json.loads(row['observation_json'])['names'][0] for row in csv_rows],
+                         ['batch-'+str(i) for i in range(count)])
+        head=urllib.request.Request(self.url+target,method='HEAD')
+        with urllib.request.urlopen(head,timeout=HTTP_TIMEOUT) as response:
+            self.assertEqual(response.status,200)
+            self.assertEqual(response.read(),b'')
+
     def test_basic_assets_and_api(self):
         code,body,_=self.request('/api/status');self.assertEqual(code,200)
         self.assertIn('router',json.loads(body))
