@@ -180,6 +180,73 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(db.execute('SELECT ts FROM samples ORDER BY id DESC LIMIT 1').fetchone()[0],
                              completed_at)
 
+    def test_round_robin_budget_never_converts_deferred_device_to_offline(self):
+        for n in range(23):
+            core.add_device({'name':'Synthetic '+str(n),
+                             'ip':'192.168.77.'+str(n+11),'port':443})
+        called=[]
+        def unreachable(device):
+            called.append(device['id'])
+            return False,None
+        with patch.object(core,'_DEVICE_PROBE_CURSOR',0), \
+             patch.object(core,'tcp_probe',side_effect=[(True,1.0),(True,2.0)]*3), \
+             patch.object(core,'probe_device',side_effect=unreachable):
+            core.collect_once()
+            first=list(called)
+            state=core.get_status()
+            self.assertEqual(state['probe_cycle']['sampled'],16)
+            self.assertEqual(state['probe_cycle']['tracked'],23)
+            self.assertEqual(state['probe_cycle']['deferred'],7)
+            with core.connect() as db:
+                observed={row['device_id'] for row in db.execute('SELECT device_id FROM device_samples')}
+                self.assertEqual(len(observed),16)
+                self.assertEqual({r['id'] for r in state['devices'] if r['online'] is None},
+                                 set(range(1,24))-observed)
+            core.collect_once()
+            second=called[len(first):]
+        self.assertEqual(len(first),16)
+        self.assertEqual(len(second),16)
+        self.assertEqual(len(set(first)),16)
+        self.assertEqual(len(set(second)),16)
+        self.assertEqual(set(first)|set(second),set(range(1,24)))
+        with core.connect() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM device_samples').fetchone()[0],32)
+        self.assertEqual(core.get_status()['probe_cycle']['deferred'],7)
+
+    def test_collector_cadence_is_start_to_start_and_skips_overruns(self):
+        clock=[100.0]; waits=[]; calls=[]
+        def collect():
+            calls.append(len(calls))
+            clock[0]+=[8,4,75][len(calls)-1]
+        class StopAfterThreeWaits:
+            def wait(self,seconds):
+                waits.append(round(seconds,2))
+                clock[0]+=seconds
+                return len(waits)==3
+        with patch.object(core,'INTERVAL',60), \
+             patch.object(core.time,'monotonic',side_effect=lambda:clock[0]), \
+             patch.object(core,'collect_once',side_effect=collect):
+            core.collector_loop(StopAfterThreeWaits())
+        self.assertEqual(waits,[52,56,45])
+        self.assertEqual(len(calls),3)
+
+    def test_initial_slow_cycle_does_not_trigger_immediate_catchup(self):
+        clock=[100.0];waits=[];calls=[]
+        def collect():
+            calls.append(1)
+            clock[0]+=(125 if len(calls)==1 else 3)
+        class StopAfterTwoWaits:
+            def wait(self,seconds):
+                waits.append(round(seconds,2))
+                clock[0]+=seconds
+                return len(waits)==2
+        with patch.object(core,'INTERVAL',60), \
+             patch.object(core.time,'monotonic',side_effect=lambda:clock[0]), \
+             patch.object(core,'collect_once',side_effect=collect):
+            core.collector_loop(StopAfterTwoWaits())
+        self.assertEqual(waits,[55,57])
+        self.assertEqual(len(calls),2)
+
     def test_slow_outbox_scan_never_blocks_sqlite_writes(self):
         entered=threading.Event();release=threading.Event()
         finished=threading.Event();written=threading.Event();failures=[]
