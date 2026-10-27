@@ -13,6 +13,7 @@ import socket
 import sqlite3
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 import threading
 import time
 from datetime import datetime, timezone
@@ -158,12 +159,21 @@ def collect_once():
     router_up, router_ms = tcp_probe(ROUTER_IP, 80)
     # Remote TCP/443 measures a specific Internet path, NOT broadband speed.
     internet_up, internet_ms = tcp_probe("1.1.1.1", 443)
-    ts = utcnow()
     # Never hold the global database lock (or a WAL transaction) during slow
     # network probes. Devices may be deleted while the probes are running.
     with request_timing.acquire(LOCK), connect() as db:
         devices = [dict(row) for row in db.execute("SELECT * FROM devices ORDER BY id")]
-    observations = [(device, *probe_device(device)) for device in devices]
+    # Bounded fan-out avoids a single unresponsive device delaying every
+    # subsequent probe. Do not share a SQLite connection across these threads.
+    if devices:
+        with ThreadPoolExecutor(max_workers=min(4,len(devices)),thread_name_prefix='fno-probe') as pool:
+            outcomes=list(pool.map(probe_device,devices))
+        observations=[(device,*outcome) for device,outcome in zip(devices,outcomes)]
+    else:
+        observations=[]
+    # Timestamp reflects completion of probes, not their start, and therefore
+    # cannot make a very slow cycle appear fresher than it really is.
+    ts = utcnow()
     with request_timing.acquire(LOCK), connect() as db:
         prev = db.execute("SELECT router_online,internet_online FROM samples ORDER BY id DESC LIMIT 1").fetchone()
         db.execute("INSERT INTO samples(ts,router_online,router_ms,internet_online,internet_ms) VALUES(?,?,?,?,?)",
