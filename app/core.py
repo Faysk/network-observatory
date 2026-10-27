@@ -222,15 +222,23 @@ def collect_once():
 
 
 def collector_loop(stop_event):
+    # Fixed start-to-start cadence, measured with a monotonic clock. A slow
+    # scan does not add another full INTERVAL to the next scheduled cycle.
+    # After an overrun skip missed slots; never create catch-up probe storms.
+    next_due=time.monotonic()+INTERVAL
     try:
         collect_once()
     except Exception as exc:
         print(f"Collector first cycle: {exc}", file=sys.stderr)
-    while not stop_event.wait(INTERVAL):
+    while not stop_event.wait(max(0,next_due-time.monotonic())):
         try:
             collect_once()
         except Exception as exc:
             print(f"Collector cycle: {exc}", file=sys.stderr)
+        next_due+=INTERVAL
+        now=time.monotonic()
+        if next_due<=now:
+            next_due+=INTERVAL*(int((now-next_due)//INTERVAL)+1)
 
 
 def put_router_metrics(data, source):
