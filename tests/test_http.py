@@ -195,7 +195,7 @@ class HttpTests(unittest.TestCase):
         import csv,io
         from app.server import safe_csv_cell
         for raw in ('=1+2','+cmd','-5+9','@SUM(1)','  =HYPERLINK(1)',
-                    '\\t+2','\\r=3','\\ufeff=5','\\u200b@A1'):
+                    '\${key}+2','\${key}=3','\${key}=5','\${key}@A1'):
             with self.subTest(raw=raw):
                 self.assertEqual(safe_csv_cell(raw),"'"+raw)
         for ordinary in ('Sensor OK','Device = gateway','',None,17):
