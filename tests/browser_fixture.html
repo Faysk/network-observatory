@@ -123,6 +123,32 @@
   d.querySelector('[data-counter-mode="observed"]').click();
   assert(d.getElementById('chartTitle').textContent==='Incrementos WAN observados','Observed mode not restored');
   notes.push('WAN observed increments and raw toggle');
+  d.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+  d.querySelector('[data-detail="wifi"]').click();
+  await wait(()=>d.getElementById('historyChart').dataset.phase==='ready','Wi-Fi detail ready');
+  const wifiSvg=d.querySelector('#historyChart svg');
+  assert(wifiSvg,'Wi-Fi chart SVG missing');
+  const wifiAxes=[...wifiSvg.querySelectorAll('text')].map(el=>el.textContent);
+  assert(wifiAxes.some(label=>label.startsWith('-')),'Signed RSSI axis missing negative dBm ticks');
+  assert(!wifiAxes.includes('0')&&!wifiAxes.includes('1'),'Wi-Fi must never use the invalid 0..1 axis');
+  const wifiLines=[...wifiSvg.querySelectorAll('.history-series-line')];
+  assert(wifiLines.length===2&&wifiLines.every(line=>line.getAttribute('d').includes('L')),
+     'Both Wi-Fi bands must render legitimate line segments');
+  assert(d.getElementById('legendBox').textContent.includes('RSSI médio · 2,4 GHz'),
+     'Wi-Fi signal incorrectly labeled as client counts');
+  assert(d.getElementById('legendBox').textContent.includes('4 leituras'),
+     '2.4 GHz valid sample count missing from legend');
+  assert(d.getElementById('legendBox').textContent.includes('5 leituras'),
+     '5 GHz valid sample count missing from legend');
+  const areaWifi=d.querySelector('#historyChart .inspect-area');
+  areaWifi.focus();
+  for(const key of ['Home','ArrowRight','ArrowRight'])
+    areaWifi.dispatchEvent(new KeyboardEvent('keydown',{key,bubbles:true}));
+  assert(d.querySelector('#historyChart .chart-inspector').textContent.includes('Sem leitura válida neste intervalo'),
+     'Missing 2.4 GHz sample must be distinguished from no period data');
+  assert(d.getElementById('selectionSummary').textContent.includes('sem leitura válida no intervalo'),
+     'A missing band must not be displayed as a numeric dBm reading');
+  notes.push('Wi-Fi signed axis, both bands and honest per-interval null');
   out.dataset.status='pass';out.textContent=notes.join(' | ');
  }catch(e){out.dataset.status='fail';out.textContent=String(e.message||e);console.error(e);}
 })();
