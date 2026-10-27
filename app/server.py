@@ -435,46 +435,46 @@ class Handler(BaseHTTPRequestHandler):
             watermark=db.execute('SELECT MAX(id) FROM router_client_samples WHERE mac=?',(mac,)).fetchone()[0]
             if watermark is None:return self.error_json(404,'Device not found')
         self.send_response(200)
-            is_csv=format_name.endswith('.csv')
-            self.send_header('Content-Type','text/csv; charset=utf-8' if is_csv else 'application/json; charset=utf-8')
-            self.send_header('Content-Disposition',f'attachment; filename="faysk-{identifier}-{period}.{format_name.split(".")[-1]}"')
-            self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff')
-            self.send_header('Connection','close');self.end_headers();self.close_connection=True
-            if getattr(self,'_head_only',False):
-                return
-            fields=('timestamp','online','rssi_dbm','snr_db','link_rx_phy_mbps','link_tx_phy_mbps','download_mbps','upload_mbps','latency_lan_ms','interface','source','quality','measurement_semantics','observation_json')
-            def csv_line(values):
-                buf=io.StringIO();csv.writer(buf).writerow([safe_csv_cell(v) for v in values]);self.wfile.write(buf.getvalue().encode('utf-8'))
-            if is_csv:
-                self.wfile.write(b'\xef\xbb\xbf');csv_line(fields)
-            else:self.wfile.write(b'[')
-            first=True
-            cursor_ts=start.isoformat()
-            cursor_id=0
-            try:
-                while True:
-                    with core.connect() as db:
-                        rows=db.execute(
-                            'SELECT id,ts,payload FROM router_client_samples '
-                            'WHERE mac=? AND id<=? AND ts>=? AND ts<=? '
-                            'AND (ts>? OR (ts=? AND id>?)) '
-                            'ORDER BY ts,id LIMIT 128',
-                            (mac,watermark,start.isoformat(),end.isoformat(),
-                             cursor_ts,cursor_ts,cursor_id)).fetchall()
-                    if not rows:break
-                    for row in rows:
-                        payload=json.loads(row['payload']);point=sample(row['ts'],payload)
-                        if is_csv:
-                            point['observation_json']=json.dumps(payload,ensure_ascii=False,allow_nan=False)
-                            csv_line([point.get(k) for k in fields])
-                        else:
-                            if not first:self.wfile.write(b',')
-                            self.wfile.write(json.dumps({'collected_at':row['ts'],'source':'huawei-b7-http','observation':payload,'measurement':point},ensure_ascii=False,allow_nan=False).encode('utf-8'))
-                        first=False
-                    cursor_ts,cursor_id=rows[-1]['ts'],rows[-1]['id']
-                if not is_csv:self.wfile.write(b']')
-            except (BrokenPipeError,ConnectionResetError):
-                self.close_connection=True
+        is_csv=format_name.endswith('.csv')
+        self.send_header('Content-Type','text/csv; charset=utf-8' if is_csv else 'application/json; charset=utf-8')
+        self.send_header('Content-Disposition',f'attachment; filename="faysk-{identifier}-{period}.{format_name.split(".")[-1]}"')
+        self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff')
+        self.send_header('Connection','close');self.end_headers();self.close_connection=True
+        if getattr(self,'_head_only',False):
+            return
+        fields=('timestamp','online','rssi_dbm','snr_db','link_rx_phy_mbps','link_tx_phy_mbps','download_mbps','upload_mbps','latency_lan_ms','interface','source','quality','measurement_semantics','observation_json')
+        def csv_line(values):
+            buf=io.StringIO();csv.writer(buf).writerow([safe_csv_cell(v) for v in values]);self.wfile.write(buf.getvalue().encode('utf-8'))
+        if is_csv:
+            self.wfile.write(b'\xef\xbb\xbf');csv_line(fields)
+        else:self.wfile.write(b'[')
+        first=True
+        cursor_ts=start.isoformat()
+        cursor_id=0
+        try:
+            while True:
+                with core.connect() as db:
+                    rows=db.execute(
+                        'SELECT id,ts,payload FROM router_client_samples '
+                        'WHERE mac=? AND id<=? AND ts>=? AND ts<=? '
+                        'AND (ts>? OR (ts=? AND id>?)) '
+                        'ORDER BY ts,id LIMIT 128',
+                        (mac,watermark,start.isoformat(),end.isoformat(),
+                         cursor_ts,cursor_ts,cursor_id)).fetchall()
+                if not rows:break
+                for row in rows:
+                    payload=json.loads(row['payload']);point=sample(row['ts'],payload)
+                    if is_csv:
+                        point['observation_json']=json.dumps(payload,ensure_ascii=False,allow_nan=False)
+                        csv_line([point.get(k) for k in fields])
+                    else:
+                        if not first:self.wfile.write(b',')
+                        self.wfile.write(json.dumps({'collected_at':row['ts'],'source':'huawei-b7-http','observation':payload,'measurement':point},ensure_ascii=False,allow_nan=False).encode('utf-8'))
+                    first=False
+                cursor_ts,cursor_id=rows[-1]['ts'],rows[-1]['id']
+            if not is_csv:self.wfile.write(b']')
+        except (BrokenPipeError,ConnectionResetError):
+            self.close_connection=True
 
     def do_POST(self):
         if not self.validate_host():return
