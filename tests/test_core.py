@@ -230,6 +230,23 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(waits,[52,56,45])
         self.assertEqual(len(calls),3)
 
+    def test_initial_slow_cycle_does_not_trigger_immediate_catchup(self):
+        clock=[100.0];waits=[];calls=[]
+        def collect():
+            calls.append(1)
+            clock[0]+=(125 if len(calls)==1 else 3)
+        class StopAfterTwoWaits:
+            def wait(self,seconds):
+                waits.append(round(seconds,2))
+                clock[0]+=seconds
+                return len(waits)==2
+        with patch.object(core,'INTERVAL',60), \
+             patch.object(core.time,'monotonic',side_effect=lambda:clock[0]), \
+             patch.object(core,'collect_once',side_effect=collect):
+            core.collector_loop(StopAfterTwoWaits())
+        self.assertEqual(waits,[55,57])
+        self.assertEqual(len(calls),2)
+
     def test_slow_outbox_scan_never_blocks_sqlite_writes(self):
         entered=threading.Event();release=threading.Event()
         finished=threading.Event();written=threading.Event();failures=[]
