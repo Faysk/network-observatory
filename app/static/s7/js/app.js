@@ -121,7 +121,7 @@ function chart(metric,opts={}){
   if(!vals||vals.length<2||!vals.some(p=>p.value!=null)){
     return `<div class="history-region" data-history-region="${esc(metric)}" aria-busy="${pending}">${statusLabel||`<div class="empty history-empty" role="status">${message}</div>`}${pending?'<div class="load-placeholder" aria-hidden="true"><i></i><i></i><i></i></div>':''}</div>`;
   }
-  if(['rx','tx','temp'].includes(metric)){const all=[...vals,...(vals2||[])].map(p=>p.value).filter(v=>v!=null&&Number.isFinite(v));if(all.length){max=Math.max(metric==='temp'?1:.01,...all)*1.15;if(metric==='temp')min=Math.max(0,Math.min(...all)-3);}}
+  if(['rx','tx','temp'].includes(metric)){const all=[...vals,...(vals2||[])].map(p=>p.value).filter(v=>v!=null&&Number.isFinite(v));if(all.length){max=Math.max(metric==='temp'?1:.01,...all)*1.15;if(metric==='temp')min=Math.min(0,Math.min(...all)-3);}}
   chartRegistry.set(id,{values:vals,secondaryValues:vals2,secondaryName:secondary,min,max,unit:cfg.unit,metric,x0,y0,w,h,selectedIndex:previousChartSelection.get(state.page+':'+state.range+':'+metric+':'+(secondary||''))});
   const d1=curve(vals,x0,y0,w,h,min,max), d2=vals2&&vals2.length>=2?curve(vals2,x0,y0,w,h,min,max):null;
   const color=cfg.color==='accent'?'var(--accent)':cfg.color==='blue'?'var(--blue)':cfg.color==='orange'?'var(--orange)':'var(--violet)';
