@@ -798,7 +798,10 @@ def run_collector(adapter, port, token, watch, keep_serving_on_auth_error=False)
         try:
             core.set_collector_state('collecting',last_attempt=core.utcnow(),reason=None)
             # Recover acknowledged-or-pending samples before reading new device data.
-            try:outbox.flush(deliver)
+            try:
+                outbox.flush(deliver)
+                if outbox.last_quarantined:
+                    print('Fila: amostras inválidas isoladas sem eliminação:',outbox.last_quarantined)
             except Exception:print('Envio anterior pendente na fila local; nova recolha será preservada.')
             collection_started = time.perf_counter()
             result = adapter.collect()
@@ -806,6 +809,8 @@ def run_collector(adapter, port, token, watch, keep_serving_on_auth_error=False)
             host_telemetry.record_collection((time.perf_counter()-collection_started)*1000)
             outbox.enqueue(result)
             outbox.flush(deliver)
+            if outbox.last_quarantined:
+                print('Fila: amostras inválidas isoladas sem eliminação:',outbox.last_quarantined)
             core.set_collector_state('ok',last_success=result['collected_at'],reason=None)
             audit=getattr(adapter,'audit',None)
             if audit:
