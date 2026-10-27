@@ -213,6 +213,23 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(db.execute('SELECT count(*) FROM device_samples').fetchone()[0],32)
         self.assertEqual(core.get_status()['probe_cycle']['deferred'],7)
 
+    def test_collector_cadence_is_start_to_start_and_skips_overruns(self):
+        clock=[100.0]; waits=[]; calls=[]
+        def collect():
+            calls.append(len(calls))
+            clock[0]+=[8,4,75][len(calls)-1]
+        class StopAfterThreeWaits:
+            def wait(self,seconds):
+                waits.append(round(seconds,2))
+                clock[0]+=seconds
+                return len(waits)==3
+        with patch.object(core,'INTERVAL',60), \
+             patch.object(core.time,'monotonic',side_effect=lambda:clock[0]), \
+             patch.object(core,'collect_once',side_effect=collect):
+            core.collector_loop(StopAfterThreeWaits())
+        self.assertEqual(waits,[52,56,45])
+        self.assertEqual(len(calls),3)
+
     def test_slow_outbox_scan_never_blocks_sqlite_writes(self):
         entered=threading.Event();release=threading.Event()
         finished=threading.Event();written=threading.Event();failures=[]
