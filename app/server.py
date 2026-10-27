@@ -2,6 +2,7 @@
 import argparse
 import gzip
 import hashlib
+import ipaddress
 from functools import lru_cache
 from email.utils import formatdate, parsedate_to_datetime
 import csv
@@ -20,6 +21,33 @@ STATIC = Path(__file__).resolve().parent / "static"
 VALT = STATIC.parent.parent / "sites" / "valt"
 # Avoid unbounded simultaneous long-running, read-only archive exports on S7.
 EXPORT_SLOTS = threading.BoundedSemaphore(4)
+
+def parse_read_cidrs(raw):
+    """Explicit local-network grants; never accept public or internet-wide ACLs."""
+    grants=[]
+    private_blocks=[ipaddress.ip_network(block) for block in
+                    ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16')]
+    for entry in (part.strip() for part in (raw or '').split(',')):
+        if not entry:continue
+        if len(grants)>=16:raise ValueError('Too many read CIDRs')
+        try:net=ipaddress.ip_network(entry,strict=False)
+        except ValueError:raise ValueError('Invalid FNO_READ_ALLOW_CIDRS entry') from None
+        if not isinstance(net,ipaddress.IPv4Network) or not any(net.subnet_of(block) for block in private_blocks):
+            raise ValueError('FNO_READ_ALLOW_CIDRS must be RFC1918 IPv4 networks')
+        grants.append(net)
+    return tuple(grants)
+
+READ_ALLOWED_CIDRS = parse_read_cidrs(os.environ.get('FNO_READ_ALLOW_CIDRS',''))
+
+def source_allowed(client_ip):
+    """Use socket peer only. Never trust Host, Origin or X-Forwarded-For."""
+    try:
+        addr=ipaddress.ip_address(client_ip)
+        if isinstance(addr,ipaddress.IPv6Address) and addr.ipv4_mapped:
+            addr=addr.ipv4_mapped
+        return addr.is_loopback or any(addr in network for network in READ_ALLOWED_CIDRS)
+    except ValueError:
+        return False
 
 # Disposable in-memory cache for public code only. No API or Vault files.
 @lru_cache(maxsize=16)
@@ -144,6 +172,8 @@ class Handler(BaseHTTPRequestHandler):
             host_telemetry.record_api(urlsplit(self.path).path, (time.perf_counter()-began)*1000)
 
     def get_response(self):
+        if not source_allowed(self.client_address[0]):
+            return self.error_json(403, 'Leitura não autorizada nesta origem')
         path = urlsplit(self.path)
         if path.scheme or path.netloc:
             return self.error_json(403, 'Proxy requests are not supported')
@@ -301,6 +331,8 @@ class Handler(BaseHTTPRequestHandler):
             if not is_csv:self.wfile.write(b']')
 
     def do_POST(self):
+        if not source_allowed(self.client_address[0]):
+            return self.error_json(403, 'Origem não autorizada')
         if not self.authenticate_write(): return
         try:
             size = int(self.headers.get("Content-Length", "0"))
@@ -335,7 +367,10 @@ def main():
     parser.add_argument("--port", type=int, default=int(os.environ.get("FNO_PORT", "8765")))
     args = parser.parse_args()
     if args.host not in ("127.0.0.1", "localhost", "::1"):
-        print("WARNING: listening on a non-loopback interface. The read API has no login; use a trusted VPN/reverse proxy.")
+        if not READ_ALLOWED_CIDRS:
+            print("WARNING: non-loopback listener; remote requests DENIED until FNO_READ_ALLOW_CIDRS is set.")
+        else:
+            print("WARNING: read API has no login; allowed local-network peers need a trusted VPN/reverse proxy for stronger authentication.")
     core.init_db()
     stop = threading.Event()
     worker = threading.Thread(target=core.collector_loop, args=(stop,), daemon=True)
