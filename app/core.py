@@ -34,11 +34,19 @@ DEVICE_PROBE_BATCH = 16
 _DEVICE_PROBE_CURSOR = 0
 _DEVICE_PROBE_PROGRESS = {'sampled':0,'deferred':0,'tracked':0,'completed_at':None}
 COLLECTOR_STATE={'state':'not_started','last_attempt':None,'last_success':None,'reason':None}
+COLLECTOR_STATE_LOCK=threading.RLock()
 
 
 def set_collector_state(state,**fields):
-    with LOCK:
+    # State publication must not queue behind a long SQLite reader after a
+    # successful commit (otherwise delivered samples look pending).
+    with COLLECTOR_STATE_LOCK:
         COLLECTOR_STATE.update(state=state,**fields)
+
+
+def get_collector_state():
+    with COLLECTOR_STATE_LOCK:
+        return dict(COLLECTOR_STATE)
 
 ROUTER = {"model": "OptiXstar HG8247B7-8N", "vendor": "Huawei", "isp": None,
           "firmware": "V5R024C00S114", "hardware": None, "ip": ROUTER_IP,
@@ -421,7 +429,6 @@ def get_status():
         result = {"router": ROUTER, "probe": dict(last) if last else None,
                   "metrics": latest_router(db), "devices": list_devices(db),
                   "huawei": latest_huawei(db),
-                  "collector": dict(COLLECTOR_STATE),
                   "probe_cycle": dict(_DEVICE_PROBE_PROGRESS),
                   "event_count": counts, "server_time": utcnow(),
                   "poll_interval_seconds": INTERVAL, "retention_days": RETENTION_DAYS, "retention_unlimited": RETENTION_DAYS==0,
@@ -434,6 +441,7 @@ def get_status():
         "quarantined_samples":sum(1 for _ in (DB_PATH.parent/"outbox"/"quarantine").rglob("*.json")),
         "durable_queue":True,
     }
+    result['collector'] = get_collector_state()
     return result
 
 

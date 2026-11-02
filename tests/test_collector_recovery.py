@@ -2,6 +2,7 @@
 import io
 import json
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -87,6 +88,27 @@ class RecoveryTests(unittest.TestCase):
         self.now -= 100
         with self.assertRaises(RecoveryWait) as wait: self.policy.check()
         self.assertEqual(wait.exception.seconds, 160)
+
+    def test_state_publication_never_waits_for_sqlite_lock(self):
+        entered=threading.Event();release=threading.Event();published=threading.Event()
+        old=core.get_collector_state()
+        def reader():
+            with core.LOCK:
+                entered.set();release.wait(3)
+        def writer():
+            core.set_collector_state('ok',last_persisted_at='synthetic')
+            snapshot=core.get_collector_state()
+            snapshot['state']='must not mutate shared state'
+            if core.get_collector_state()['state']=='ok':published.set()
+        a=threading.Thread(target=reader);b=threading.Thread(target=writer)
+        a.start()
+        try:
+            self.assertTrue(entered.wait(1));b.start()
+            self.assertTrue(published.wait(1),'state publication waited for a database reader')
+        finally:
+            release.set();a.join(3)
+            if b.ident is not None:b.join(3)
+            core.COLLECTOR_STATE.clear();core.COLLECTOR_STATE.update(old)
 
     def test_http_rejection_stage_is_preserved(self):
         adapter = h.HuaweiB7('192.168.1.1', 'fixture', 'fixture')
@@ -207,7 +229,8 @@ class DeliveryTests(unittest.TestCase):
         handler.validate_host = lambda: True; handler.authenticate_write = lambda: True
         handler.respond = MagicMock(side_effect=BrokenPipeError)
         handler.error_json = MagicMock()
-        handler.do_POST()
+        with patch.object(core, 'WRITE_TOKEN', 'synthetic-write-token-at-least-32-characters'):
+            handler.do_POST()
         handler.respond.assert_called_once(); handler.error_json.assert_not_called()
         with core.connect() as db:
             self.assertEqual(db.execute('SELECT count(*) FROM huawei_samples').fetchone()[0], 1)
