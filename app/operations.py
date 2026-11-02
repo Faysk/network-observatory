@@ -212,7 +212,7 @@ def read(now=None, host_snapshot=None, changes=None, rules=None):
             if level:
                 out.append(alert('storage_reserve',level,'Pouco espaço no volume do arquivo',
                                  str(free)+' GiB disponíveis no volume configurado.','storage'))
-        if collector.get('state') in ('auth_blocked','backoff'):
+        if collector.get('state') in ('auth_blocked','auth_backoff','backoff','persisting'):
             out.append(alert('collector_state','warning','Coletor precisa de atenção',
                              'Estado reportado: '+collector['state']+'. Não assume falha na Internet.','collector'))
         if collector_age is not None and collector_age >= rules['collector_stale_minutes']:

@@ -190,13 +190,15 @@ class ObservationTests(unittest.TestCase):
         with patch.object(adapter,'_request',side_effect=h.AuthenticationError('expired')):
             with self.assertRaises(h.AuthenticationError):o.collect(adapter,conn)
 
-    def test_authentication_failure_preserves_server_without_retry(self):
+    def test_authentication_failure_preserves_server_and_schedules_retry(self):
         with tempfile.TemporaryDirectory() as temp,patch.object(core,'DB_PATH',Path(temp)/'test.db'):
             adapter=MagicMock();adapter.collect.side_effect=h.AuthenticationError('expired')
+            adapter.clock.return_value=1000;adapter.next_attempt=0
             with patch('app.adapters.huawei_b7.time.sleep',side_effect=KeyboardInterrupt):
                 with self.assertRaises(KeyboardInterrupt):h.run_collector(adapter,12345,'x'*32,True,keep_serving_on_auth_error=True)
             self.assertEqual(adapter.collect.call_count,1)
-            self.assertEqual(core.COLLECTOR_STATE['state'],'auth_blocked')
+            self.assertEqual(core.COLLECTOR_STATE['state'],'auth_backoff')
+            self.assertIsNotNone(core.COLLECTOR_STATE['next_retry_at'])
             adapter.close.assert_called_once()
 
     def test_optional_auth_failure_must_reach_session_manager(self):

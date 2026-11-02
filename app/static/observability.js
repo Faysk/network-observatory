@@ -89,7 +89,13 @@ async function historyPage(source,output,button,before=0){
  }catch{output.append(node('p','Não foi possível consultar o arquivo. Pode tentar novamente.'));}
  finally{button.disabled=false;}
 }
-function state(){const c=window.FNO?.state?.status?.collector;collector.textContent=c?({ok:'Coletor ativo',collecting:'Recolha em curso',auth_blocked:'Autenticação bloqueada. O painel e o histórico continuam disponíveis; verificar acesso e reiniciar o serviço para retomar.',backoff:'Coletor em espera após falha. Histórico disponível.',not_started:'Coletor ainda sem estado nesta execução.'}[c.state]||'Estado desconhecido'):'Estado do coletor indisponível';collector.dataset.state=c?.state||'unknown';}
+function state(){
+ const c=window.FNO?.state?.status?.collector;
+ let text=c?({ok:'Coletor ativo',collecting:'Recolha em curso',persisting:'A gravar a amostra recolhida',auth_backoff:'Autenticação em recuperação automática. Histórico disponível.',auth_blocked:'Autenticação bloqueada. Intervenção necessária; o painel e o histórico continuam disponíveis.',backoff:'Coletor em espera após falha. Histórico disponível.',not_started:'Coletor ainda sem estado nesta execução.'}[c.state]||'Estado desconhecido'):'Estado do coletor indisponível';
+ if(c?.state==='auth_backoff'&&Number.isFinite(Date.parse(c.next_retry_at)))text+=' Próxima tentativa: '+new Date(c.next_retry_at).toLocaleString('pt-PT',{timeZoneName:'short'})+'.';
+ if(collector.textContent!==text)collector.textContent=text;
+ collector.dataset.state=c?.state||'unknown';
+}
 document.addEventListener('fno:update',state);state();
 function table(data,source){const wrap=node('div',undefined,'observation-table');wrap.tabIndex=0;wrap.setAttribute('role','region');wrap.setAttribute('aria-label','Dados de '+source.title);const t=node('table'),head=node('thead'),tr=node('tr'),body=node('tbody');const keys=[...new Set(data.flatMap(r=>Object.keys(r)))];for(const k of keys){const th=node('th',labels[k]||k);th.scope='col';tr.append(th);}head.append(tr);t.append(head);for(const row of data){const r=node('tr');for(const k of keys){let v=row[k];if(k==='width_policy_code'&&v!=null)v=payload.width_policies?.[v]??`Código ${v}`;r.append(node('td',v==null?'Sem dados':v===true?'Sim':v===false?'Não':String(v)));}body.append(r);}t.append(body);wrap.append(t);return wrap;}
 function badge(text,variant='neutral'){

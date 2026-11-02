@@ -227,13 +227,39 @@ function chart(node,series,defs,period,selection){
  area.addEventListener('focus',()=>inspect(index));area.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','Home','End','Escape'].includes(e.key)){e.preventDefault();if(e.key==='Escape'){hide();return;}inspect(e.key==='Home'?0:e.key==='End'?valid.length-1:index+(e.key==='ArrowRight'?1:-1));}});
 }
 function appOnline(){const meta=state.resources.inventory,ready=['ready','empty'].includes(meta.phase)||(meta.phase==='loading'&&meta.at!=null);return state.api&&ready?state.clients.filter(c=>c.quality==='ok'&&c.reported_status==='Online').length:null;}
+function collectorNotice(s){
+ const c=s?.collector||{},h=s?.huawei||{},pending=s?.recording?.pending_samples;
+ const date=v=>Number.isFinite(Date.parse(v))?new Date(v).toLocaleString('pt-PT',{timeZoneName:'short'}):'não disponível';
+ const reasons={session_expired:'sessão rejeitada pelo router',login_rate_limited:'intervalo mínimo entre autenticações',login_failed:'login sem confirmação; causa não determinada',login_rejected:'login rejeitado; causa não determinada',invalid_login_challenge:'resposta de autenticação incompatível',authentication_failed:'falha de autenticação sem causa determinada',recovery_state_invalid:'estado de recuperação precisa de verificação'};
+ const age=Date.parse(s?.server_time)-Date.parse(h.collected_at),stale=h.quality!=='ok'||!Number.isFinite(age)||age>180000||age< -5000;
+ let title='',chip='';
+ if(c.state==='auth_blocked'||c.intervention_required){title='Coleta interrompida; intervenção necessária';chip='COLETA BLOQUEADA';}
+ else if(c.state==='auth_backoff'){title='Coleta em recuperação automática';chip='RECUPERAÇÃO AUTOMÁTICA';}
+ else if(pending>0||c.state==='persisting'){title='Gravação de amostras pendente';chip='GRAVAÇÃO PENDENTE';}
+ else if(stale){title='Sem leitura recente do Huawei';chip='SEM LEITURA RECENTE';}
+ else if(c.state==='backoff'){title='Coleta temporariamente indisponível';chip='COLETA EM ESPERA';}
+ if(!title)return null;
+ const detail=[title,reasons[c.reason],`Última amostra gravada: ${date(h.collected_at)}`,
+   Number.isFinite(age)&&age>=0?`idade: ${Math.floor(age/60000)} min`:null,
+   c.last_attempt?`última tentativa: ${date(c.last_attempt)}`:null,
+   c.next_retry_at&&!c.intervention_required?`próxima tentativa: ${date(c.next_retry_at)}`:null,
+   pending>0?`${pending} amostra(s) aguardando confirmação`:null,'Histórico preservado. Atualizar apenas relê o painel.'].filter(Boolean).join(' · ');
+ return {title,chip,detail};
+}
 function renderHome(){
  const s=state.status,h=s?.huawei||{},current=state.api&&h.quality==='ok'&&fresh(h.collected_at),m=current?h.metrics||{}:{},o=state.overview;
  const probe=s?.probe,probeCurrent=state.api&&probe&&fresh(probe.ts);
  $('.demo-chip').textContent=current?'● RECOLHA ATIVA':'● SEM LEITURA RECENTE';
- $('.notice>span').textContent=current?`Leitura real · ${time(h.collected_at)} · Retenção: ${retention(s.retention_days)} · origem ${h.source}`:'Sem leitura recente. Os valores atuais ficam indisponíveis; o histórico continua preservado.';
+ const noticeText=current?`Leitura real · ${time(h.collected_at)} · Retenção: ${retention(s.retention_days)} · origem ${h.source}`:'Sem leitura recente. Os valores atuais ficam indisponíveis; o histórico continua preservado.';
  $('.local-status small').textContent=current?'Coletor Huawei ativo':'A aguardar coletor';
  $('#health-title').textContent=current?'A tua rede, em observação.':'A aguardar telemetria.';
+ const warning=state.api?collectorNotice(s):null;
+ const notice=$('.notice>span'),detail=warning?.detail||noticeText;if(notice.textContent!==detail)notice.textContent=detail;
+ if(warning){
+   $('.demo-chip').textContent='● '+warning.chip;
+   $('.local-status small').textContent=warning.title;
+   $('#health-title').textContent=warning.title;
+ }
  $('.hero-main p').textContent=probeCurrent?`Gateway: ${probe.router_online==null?'sem dados':probe.router_online?'responde':'sem resposta TCP'} · exterior: ${probe.internet_online==null?'sem dados':probe.internet_online?'responde':'sem resposta TCP'}.`:'Sem sondas TCP recentes para avaliar a conectividade.';
  const coverage=o?.quality?.coverage_percent;
  $('.signal-main p').textContent='Percentual da janela com uma coleta gravada há no máximo 3 minutos. Não é disponibilidade da Internet.';

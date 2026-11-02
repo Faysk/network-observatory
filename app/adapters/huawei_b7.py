@@ -52,7 +52,14 @@ class AdapterError(Exception):
 
 
 class AuthenticationError(AdapterError):
-    pass
+    CODES = {'session_expired', 'login_rate_limited', 'invalid_login_challenge',
+             'login_failed', 'login_rejected', 'authentication_failed'}
+
+    def __init__(self, code, stage='data', http_status=None):
+        self.code = code if code in self.CODES else 'authentication_failed'
+        self.stage = stage if stage in ('data', 'challenge', 'login') else 'data'
+        self.http_status = http_status if type(http_status) is int and http_status in (401,403,301,302,303) else None
+        super().__init__(self.code)
 
 
 def load_credentials(path):
@@ -554,6 +561,7 @@ class HuaweiB7:
         self.observation_cache = None
         self.next_observation_attempt = 0
         self.authentication_error = AuthenticationError
+        self.login_recovery = None
         self.lock = threading.Lock()
 
     def _request(self, connection, method, path, body=None, cookie=None):
@@ -579,22 +587,25 @@ class HuaweiB7:
         if len(raw) > 2_000_000:
             raise AdapterError('response_too_large')
         if response.status in (401,403):
-            raise AuthenticationError('session_expired')
+            stage = 'login' if path == '/login.cgi' else 'challenge' if path == '/asp/GetRandCount.asp' else 'data'
+            raise AuthenticationError('login_rejected' if stage == 'login' else 'session_expired', stage, response.status)
         if response.status not in (200,301,302,303):
             raise AdapterError('router_http_error')
         if response.status != 200 and path != '/login.cgi':
-            raise AuthenticationError('session_expired')
+            raise AuthenticationError('session_expired', 'data', response.status)
         return raw.decode('utf-8-sig',errors='replace'), response.getheaders()
 
     def _login(self, conn):
         now = self.clock()
         if now-self.last_login_attempt < 60:
-            raise AuthenticationError('login_rate_limited')
+            raise AuthenticationError('login_rate_limited', 'login')
+        if self.login_recovery is not None:
+            self.login_recovery.before_login()
         self.last_login_attempt = now
         token, _ = self._request(conn,'POST','/asp/GetRandCount.asp', b'')
         token = token.strip()
         if not re.fullmatch(r'[A-Za-z0-9_-]{8,256}', token):
-            raise AuthenticationError('invalid_login_challenge')
+            raise AuthenticationError('invalid_login_challenge', 'challenge')
         body = urlencode({'UserName':self.username, 'PassWord':base64.b64encode(self.password.encode()).decode(),
                           'Language':'portuguese','x.X_HW_Token':token})
         _, headers = self._request(conn,'POST','/login.cgi', body, 'Cookie=body:Language:portuguese:id=-1')
@@ -603,7 +614,7 @@ class HuaweiB7:
             if name.lower() == 'set-cookie':
                 jar.load(value)
         if not jar:
-            raise AuthenticationError('login_failed')
+            raise AuthenticationError('login_failed', 'login')
         self.cookie = '; '.join(f'{name}={item.value}' for name,item in jar.items())
 
     def collect(self):
@@ -618,17 +629,19 @@ class HuaweiB7:
                 self.connection = http.client.HTTPConnection(self.host,80,timeout=8)
             conn = self.connection
             successful = False
+            logged_in = False
             try:
                 if self.verified_model is None:
                     landing, _ = self._request(conn,'GET','/')
                     self.verified_model = parse_model(landing)
                 if not self.cookie:
                     self._login(conn)
+                    logged_in = True
                 try:
                     payload = self._read_data(conn)
                 except AuthenticationError:
                     # Only renew a previously proven session, once per cycle.
-                    if self.cached is None:
+                    if self.cached is None or logged_in:
                         raise
                     self.cookie = None
                     # The router's 403 leaves the old transport unusable even
@@ -787,55 +800,94 @@ def run_collector(adapter, port, token, watch, keep_serving_on_auth_error=False)
     opener = build_opener(ProxyHandler({}))
     from app.outbox import Outbox
     from app import core
+    from app.collector_recovery import LoginRecovery, RecoveryWait
+    recovery = LoginRecovery(core.DB_PATH.parent/'collector-recovery.json')
+    adapter.login_recovery = recovery
     outbox=Outbox(core.DB_PATH.parent/'outbox')
     def deliver(result):
         stamp=datetime.fromisoformat(result['collected_at'])
         historical=(datetime.now(timezone.utc)-stamp).total_seconds()>180
+        if keep_serving_on_auth_error:
+            # Same process: acknowledge only after the SQLite transaction exits.
+            # No loopback HTTP deadline racing a slow commit on microSD.
+            core.put_huawei_sample(result, historical=historical)
+            core.set_collector_state(core.COLLECTOR_STATE['state'],
+                                     last_persisted_at=result['collected_at'])
+            return
         headers={'Content-Type':'application/json','X-API-Key':token}
         if historical:headers['X-FNO-Backfill']='1'
         request=Request(f'http://127.0.0.1:{port}/api/ingest/huawei',data=json.dumps(result,allow_nan=False).encode(),headers=headers)
-        with opener.open(request,timeout=8) as response:
+        with opener.open(request,timeout=30) as response:
             if response.status!=201:raise AdapterError('local_ingest_failed')
     while True:
+        # Delivery is independent of router authentication, including hard block.
         try:
-            core.set_collector_state('collecting',last_attempt=core.utcnow(),reason=None)
-            # Recover acknowledged-or-pending samples before reading new device data.
-            try:
-                outbox.flush(deliver)
-                if outbox.last_quarantined:
-                    print('Fila: amostras inválidas isoladas sem eliminação:',outbox.last_quarantined)
-            except Exception:print('Envio anterior pendente na fila local; nova recolha será preservada.')
+            outbox.flush(deliver)
+        except Exception:
+            print('Entrega local pendente; amostras preservadas na fila.')
+        try:
+            recovery.check()
+            if adapter.clock() < adapter.next_attempt:
+                if not watch:
+                    raise SystemExit('Coletor em espera pelo intervalo de recolha.')
+                time.sleep(60)
+                continue
+            core.set_collector_state('collecting',last_attempt=core.utcnow(),reason=None,
+                                     auth_stage=None, **recovery.public())
             collection_started = time.perf_counter()
             result = adapter.collect()
             from app import host_telemetry
             host_telemetry.record_collection((time.perf_counter()-collection_started)*1000)
             outbox.enqueue(result)
+            core.set_collector_state('persisting', last_collected_at=result['collected_at'])
+            recovery.success()
             outbox.flush(deliver)
-            if outbox.last_quarantined:
+            if getattr(outbox, 'last_quarantined', 0):
                 print('Fila: amostras inválidas isoladas sem eliminação:',outbox.last_quarantined)
-            core.set_collector_state('ok',last_success=result['collected_at'],reason=None)
+            core.set_collector_state('ok',last_success=result['collected_at'],reason=None,
+                                     auth_stage=None, auth_http_status=None, renewals=adapter.renewals,
+                                     **recovery.public())
             audit=getattr(adapter,'audit',None)
             if audit:
                 try:audit.finish(result,port)
                 except Exception:
                     print('Auditoria indisponível; amostra já guardada. Consultar testes e relatório local.')
             print('Recolha guardada:',result['collected_at'],len(result['interfaces']),'interfaces · renovações:',adapter.renewals)
-        except AuthenticationError:
-            core.set_collector_state('auth_blocked',reason='authentication_failed')
-            if keep_serving_on_auth_error and watch:
-                adapter.close()
-                print('Autenticação bloqueada; painel e histórico continuam disponíveis. Reinício manual necessário após verificar o acesso.')
-                while True:time.sleep(1)
-            raise SystemExit('Autenticação falhou/expirou. Coletor parado; não repete credenciais automaticamente.') from None
+        except AuthenticationError as exc:
+            adapter.close()
+            if exc.code == 'login_rate_limited':
+                # This is our own floor, not a rejected credential or a router
+                # failure. Do not spend the recovery budget on it.
+                recovery.data.update(next_retry=time.time()+60, reason=exc.code)
+                recovery.save()
+            else:
+                recovery.failure(exc.code)
+            core.set_collector_state('auth_blocked' if recovery.data['blocked'] else 'auth_backoff',
+                                     reason=exc.code, auth_stage=exc.stage, auth_http_status=exc.http_status,
+                                     last_auth_failure_at=core.utcnow(), last_auth_failure_reason=exc.code,
+                                     auth_attempt_ms=round((time.perf_counter()-collection_started)*1000,2),
+                                     renewals=adapter.renewals, **recovery.public())
+            print('Autenticação:', exc.code, '· etapa:', exc.stage,
+                  '· recuperação:', 'intervenção necessária' if recovery.data['blocked'] else recovery.public()['next_retry_at'])
+            if not (keep_serving_on_auth_error and watch):
+                raise SystemExit('Autenticação indisponível; consultar estado sanitizado do coletor.') from None
+        except RecoveryWait as exc:
+            core.set_collector_state('auth_blocked' if exc.blocked else 'auth_backoff',
+                                     reason=exc.reason, **recovery.public())
+            if not watch:
+                raise SystemExit('Autenticação em espera ou bloqueada pela política local.') from None
         except Exception as exc:
-            code = str(exc) if isinstance(exc,AdapterError) else 'local_ingest_unavailable'
-            core.set_collector_state('backoff',reason='collection_unavailable')
+            code = str(exc) if isinstance(exc,AdapterError) and str(exc) in {
+                'router_unreachable','unsupported_response','unsupported_schema',
+                'backoff_active','local_ingest_failed'} else 'local_ingest_unavailable'
+            core.set_collector_state('backoff',reason='persistence_unavailable' if outbox.pending() else 'collection_unavailable')
             print('Recolha indisponível:',code,'· sem atualização das métricas.')
             if not watch:
                 raise SystemExit(1) from None
         if not watch:
             return
-        time.sleep(max(60,adapter.next_attempt-adapter.clock()))
+        # Wake every minute to drain durable delivery even during auth backoff.
+        time.sleep(60)
 
 
 if __name__ == '__main__':
