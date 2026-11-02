@@ -151,6 +151,13 @@
   assert(d.getElementById('selectionSummary').textContent.includes('sem leitura válida no intervalo'),
      'A missing band must not be displayed as a numeric dBm reading');
   notes.push('Wi-Fi signed axis, both bands and honest per-interval null');
+  d.getElementById('sheetClose').click();
+  frame.style.width='320px';await sleep(100);
+  const collectorNotice=d.querySelector('.notice');
+  assert(collectorNotice.scrollWidth<=collectorNotice.clientWidth+1,'collector notice overflows at 320px');
+  const refresh=d.getElementById('modeToggle');refresh.focus();
+  assert(d.activeElement===refresh,'collector refresh must remain keyboard accessible');
+  notes.push('persistent collector warning at 320px with keyboard access');
   out.dataset.status='pass';out.textContent=notes.join(' | ');
  }catch(e){out.dataset.status='fail';out.textContent=String(e.message||e);console.error(e);}
 })();
