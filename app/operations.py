@@ -185,7 +185,7 @@ def read(now=None, host_snapshot=None, changes=None, rules=None):
     host_db = core.DB_PATH.parent/'host-telemetry.db'
     points, truncated = history(host_db,now)
     host_age = age_minutes(host_snapshot.get('timestamp'),now)
-    collector = dict(core.COLLECTOR_STATE)
+    collector = core.get_collector_state()
     collector_age = age_minutes(collector.get('last_success'),now)
     rss = diag.get('processRssMB') if finite(diag.get('processRssMB')) else None
     api95 = diag.get('apiP95Ms') if finite(diag.get('apiP95Ms')) else None

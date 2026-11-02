@@ -59,6 +59,9 @@ class LoginRecovery:
             raise RecoveryWait(self.data['reason'] or 'authentication_failed', 60, True)
         remaining = max(self.data['next_retry'], self.data['last_login'] + 60) - now
         if remaining > 0:
+            # A restart during the persisted login floor is also a real wait;
+            # expose its deadline instead of advertising an unscheduled retry.
+            self.data['next_retry'] = now + remaining
             raise RecoveryWait(self.data['reason'] or 'login_rate_limited', remaining)
 
     def before_login(self):
