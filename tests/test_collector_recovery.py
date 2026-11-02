@@ -32,6 +32,7 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaises(RecoveryWait) as wait:
             restarted.before_login()
         self.assertEqual(wait.exception.seconds, 60)
+        self.assertIsNotNone(restarted.public()['next_retry_at'])
         self.policy.failure('session_expired')
         restarted = LoginRecovery(self.path, clock=lambda: self.now)
         with self.assertRaises(RecoveryWait) as wait:
