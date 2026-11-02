@@ -554,6 +554,11 @@ class Handler(BaseHTTPRequestHandler):
                 core.delete_device(int(data.get("id", -1)))
                 return self.respond(200, {"ok": True})
             return self.error_json(404, "Unknown endpoint")
+        except (BrokenPipeError, ConnectionResetError):
+            # A committed mutation remains committed if its acknowledgement
+            # cannot be delivered. Never try to send a second response.
+            self.close_connection = True
+            return
         except (ValueError, TypeError) as exc:
             return self.error_json(400, str(exc))
         except Exception as exc:
