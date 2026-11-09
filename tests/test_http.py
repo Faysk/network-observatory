@@ -169,8 +169,15 @@ class HttpTests(unittest.TestCase):
             code,body,_=self.request(path)
             self.assertEqual(code,200)
             self.assertIn(b'class="project-switch"',body)
-            self.assertIn(b'href="/router/"',body)
-            self.assertIn(b'href="/s7/"',body)
+            self.assertIn(b'WORKSPACE <span>07</span>',body)
+            self.assertIn(b'href="https://ssh-br.faysk.dev/router/"',body)
+            self.assertIn(b'href="https://ssh-br.faysk.dev/monitor/"',body)
+            if path in ('/', '/router', '/router/'):
+                self.assertIn(b'href="/s7/"',body)
+                self.assertNotIn(b'href="/router/"',body)  # Current device is in summary.
+            else:
+                self.assertIn(b'href="/router/"',body)
+                self.assertNotIn(b'href="/s7/"',body)  # Current device is in summary.
         for path in ('/router/styles.css','/router/app.js','/workspace.css','/s7/js/app.js'):
             code,_,_=self.request(path);self.assertEqual(code,200)
         with self.assertRaises(urllib.error.HTTPError) as error:self.request('/router/../config/login.txt')
