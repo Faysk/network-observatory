@@ -23,3 +23,7 @@
 .workspace-picker .project-check{color:var(--ws-accent);font-size:13px}
 @media(min-width:671px) and (max-width:1160px){[data-workspace="router"] .workspace-picker{margin-inline:8px}[data-workspace="router"] .workspace-label{font-size:0;justify-content:center}[data-workspace="router"] .workspace-label span{font-size:9px}[data-workspace="router"] .project-switch summary{justify-content:center;padding-inline:6px}[data-workspace="router"] summary .project-copy,[data-workspace="router"] .project-caret{display:none}[data-workspace="router"] .project-options{width:225px}}
 @media(prefers-reduced-motion:reduce){.workspace-picker *{transition:none!important}}
+
+/* All projects share a bounded, keyboard-scrollable workspace list. */
+.workspace-picker .project-options{max-height:min(68vh,470px);overflow-y:auto;overscroll-behavior:contain}
+.workspace-picker .workspace-hint{color:var(--ws-muted,#91a3be);font-size:10px;line-height:1.5;margin:5px 8px 3px}
