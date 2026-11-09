@@ -1,14 +1,14 @@
 {
   "repository": "Faysk/s7-edge-observatory",
-  "source_commit": "84029ca0f8650da704ab35012c71c19122c7b3d3",
+  "source_commit": "14a556ea465b03d981fbb403d0d9e63405efcc6c",
   "normalization": "UTF-8 bytes with CRLF normalized to LF",
   "sha256": {
     "js/app.js": "d4d6df891bf618af84d29269bb37ca39e75e071deb88b4e940a96187f49097b7",
     "css/styles.css": "996845a899a3816a0c0609ac277ec883d26c69e0ecac298bea4e14dd8840a20f",
-    "index.html": "a188d21e052428cdcbe6baf4162352833e335944e3c4c51089baa084aaa05e2e"
+    "index.html": "bfbaaa7b3bd4de9c2464a40d10af8108c32f11050b7965987d6c7c261ae57df1"
   },
   "shared_root_sha256": {
-    "workspace.css": "7f4530319a47f26cb2c1eda18b372e6c74a31fca4f85391a9c7c121702eda1ac",
+    "workspace.css": "a8f30ed56e4845d957d101a99a8bf521438b5eb859603df6e7db2760451bc172",
     "finish.css": "677c34d8d5ad98b4ecb783c2ab67135401a52c05959cc32fde5a8fb87b241186",
     "finish.js": "d3475a2cb4fbb36c279375a5265641ef0ec44d2020be1cbec05cd32489aeaf1d",
     "loading.css": "903147c6235c79f434918f94df5e49b013626f8667842d95140add067d041670"
